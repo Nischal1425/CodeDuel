@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'; // Removed AlertDialogTrigger as it's part of page now
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info } from 'lucide-react'; // Added PlaySquare, Info
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info } from 'lucide-react';
 import type { GenerateCodingChallengeOutput, TestCase } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
-import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions'; // Updated import
-import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions'; // Updated import
+import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
+import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { GameTimer } from './_components/GameTimer';
@@ -25,12 +25,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ToastAction } from "@/components/ui/toast";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { cn } from '@/lib/utils';
 
 
 const DEFAULT_LANGUAGE = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
 
-type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingComparison' | 'gameOver'; // Renamed submittingEvaluation to submittingComparison
+type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingComparison' | 'gameOver';
 type DifficultyLobby = 'easy' | 'medium' | 'hard';
 type SupportedLanguage = "javascript" | "python" | "cpp";
 
@@ -38,9 +39,9 @@ type GameOverReason =
   | "comparison_player1_wins"
   | "comparison_player2_wins"
   | "comparison_draw"
-  | "timeup_player1_submitted_only" // Player 1 submitted, P2 timed out
-  | "timeup_player2_submitted_only" // Player 2 submitted, P1 timed out
-  | "timeup_both_submitted" // Both submitted by timeout, go to comparison
+  | "timeup_player1_submitted_only"
+  | "timeup_player2_submitted_only"
+  | "timeup_both_submitted"
   | "timeup_neither_submitted"
   | "forfeit_player1"
   | "error"
@@ -126,7 +127,7 @@ export default function ArenaPage() {
 
   const [playerHasSubmittedCode, setPlayerHasSubmittedCode] = useState(false);
   const [opponentHasSubmittedCode, setOpponentHasSubmittedCode] = useState(false);
-  const [opponentCode, setOpponentCode] = useState<string | null>(null); // Will store question.solution
+  const [opponentCode, setOpponentCode] = useState<string | null>(null);
   const [isComparing, setIsComparing] = useState(false);
   const [comparisonResult, setComparisonResult] = useState<CompareCodeSubmissionsOutput | null>(null);
 
@@ -161,7 +162,7 @@ export default function ArenaPage() {
     setComparisonResult(null);
     setTimeRemaining(0);
     setErrorLoadingQuestion(null);
-    setGameOverReason("error"); // Default reason
+    setGameOverReason("error");
     setShowLeaveConfirm(false);
     setLeaveConfirmType(null);
     if (opponentSubmissionTimeoutRef.current) {
@@ -183,12 +184,10 @@ export default function ArenaPage() {
     setQuestion(null);
 
     try {
-      // Language parameter is not passed to generateCodingChallenge yet, it generates JS based challenges.
-      // The problem statement should be language-agnostic.
       const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
       if (gameStateRef.current !== 'searching') {
            console.log("Search cancelled during question fetch.");
-            if (player && lobbyInfo) {
+            if (player && lobbyInfo) { // Check if player & lobbyInfo are defined
                 const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
                 setPlayer(refundedPlayer);
                 toast({ title: "Search Cancelled", description: `Entry fee of ${lobbyInfo.entryFee} coins refunded.`, variant: "default" });
@@ -197,18 +196,16 @@ export default function ArenaPage() {
            return;
       }
       setQuestion(challenge);
-      setOpponentCode(challenge.solution); // Mock opponent uses the reference solution
+      setOpponentCode(challenge.solution);
       setTimeRemaining(lobbyInfo.baseTime * 60);
       setGameState('inGame');
 
-      // Simulate opponent submission
-      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4); // 30-70% of game time
+      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4);
       opponentSubmissionTimeoutRef.current = setTimeout(() => {
-        if (gameStateRef.current === 'inGame' && !opponentHasSubmittedCode) { // Check if game still active and opponent hasn't submitted
+        if (gameStateRef.current === 'inGame' && !opponentHasSubmittedCode) {
           setOpponentHasSubmittedCode(true);
           toast({ title: "Opponent Alert!", description: `${mockOpponent?.username || 'Opponent'} has submitted their solution!`, className: "bg-yellow-500 text-white" });
-          // If player has also submitted, trigger comparison
-          if (playerHasSubmittedCode && timeRemainingRef.current > 0) { // Ensure time hasn't run out
+          if (playerHasSubmittedCode && timeRemainingRef.current > 0) {
             handleSubmissionFinalization();
           }
         }
@@ -231,7 +228,7 @@ export default function ArenaPage() {
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [player, toast, setPlayer, currentLobbyDetails, opponentHasSubmittedCode, playerHasSubmittedCode, mockOpponent?.username]);
+  }, [player, toast, setPlayer, currentLobbyDetails, opponentHasSubmittedCode, playerHasSubmittedCode, mockOpponent?.username, handleSubmissionFinalization]);
 
 
   const handleSelectLobby = (lobbyName: DifficultyLobby) => {
@@ -297,7 +294,7 @@ export default function ArenaPage() {
       setGameOverReason("error");
       return;
     }
-    if (gameStateRef.current === 'submittingComparison' || gameStateRef.current === 'gameOver') return; // Already processing or ended
+    if (gameStateRef.current === 'submittingComparison' || gameStateRef.current === 'gameOver') return;
 
     setGameState('submittingComparison');
     setIsComparing(true);
@@ -306,10 +303,10 @@ export default function ArenaPage() {
     try {
       const comparisonInput = {
         player1Code: code,
-        player2Code: opponentCode, // This is the question.solution
+        player2Code: opponentCode,
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
-        language: language, // Player's chosen language
+        language: language,
         difficulty: currentLobbyDetails.name,
       };
       const result = await compareCodeSubmissions(comparisonInput);
@@ -328,19 +325,16 @@ export default function ArenaPage() {
         toast({ title: "Victory!", description: `You won the duel! ${winningsPaidOut} coins awarded.`, className: "bg-green-500 text-white", duration: 7000 });
       } else if (result.winner === 'player2') {
         setGameOverReason("comparison_player2_wins");
-        // Entry fee already deducted, no change to player coins
         toast({ title: "Defeat", description: "Your opponent's solution was deemed superior.", variant: "destructive", duration: 7000 });
-      } else { // Draw
+      } else {
         setGameOverReason("comparison_draw");
-        // Entry fee already deducted, no change to player coins
         toast({ title: "Draw!", description: "The duel ended in a draw. Your entry fee was consumed.", variant: "default", duration: 7000 });
       }
     } catch (error) {
       console.error("Error during code comparison:", error);
       toast({ title: "Comparison Error", description: "Could not compare submissions. Mocking draw.", variant: "destructive" });
-      setComparisonResult(null); // Or a mock result if desired
-      setGameOverReason("error"); // Or specific error reason
-      // No coin change on error, fee was already deducted
+      setComparisonResult(null);
+      setGameOverReason("error");
     } finally {
       setIsComparing(false);
       setGameState('gameOver');
@@ -348,7 +342,7 @@ export default function ArenaPage() {
   }, [player, question, currentLobbyDetails, opponentCode, code, language, setPlayer, toast]);
 
 
-  const handleSubmitCode = async (e?: FormEvent) => { // Make e optional for programmatic calls
+  const handleSubmitCode = async (e?: FormEvent) => {
     e?.preventDefault();
     if (!code.trim()) {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
@@ -358,17 +352,13 @@ export default function ArenaPage() {
         toast({ title: "Error", description: "Game data missing. Cannot submit.", variant: "destructive" });
         return;
     }
-    if (playerHasSubmittedCode || gameStateRef.current !== 'inGame') return; // Prevent re-submission or submission outside game
+    if (playerHasSubmittedCode || gameStateRef.current !== 'inGame') return;
 
     setPlayerHasSubmittedCode(true);
     toast({title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground"});
 
     if (opponentHasSubmittedCode) {
-      // Both have submitted, proceed to comparison
       handleSubmissionFinalization();
-    } else {
-      // Player submitted, opponent has not
-      // UI will show "Waiting for opponent..."
     }
   };
 
@@ -382,23 +372,17 @@ export default function ArenaPage() {
     });
 
     if (playerHasSubmittedCode && opponentHasSubmittedCode) {
-      setGameOverReason("timeup_both_submitted"); // Both submitted, proceed to comparison
+      setGameOverReason("timeup_both_submitted");
       handleSubmissionFinalization();
     } else if (playerHasSubmittedCode && !opponentHasSubmittedCode) {
       setGameOverReason("timeup_player1_submitted_only");
-      // Player 1 submitted, opponent didn't. Player 1 effectively wins, but let comparison confirm against reference.
-      // We need opponentCode for comparison; if opponent didn't submit, maybe compare P1 against ref.
-      // For now, let's assume we always have opponentCode (reference)
-      handleSubmissionFinalization(); // Pass player's code and reference as opponent code
+      handleSubmissionFinalization();
     } else if (!playerHasSubmittedCode && opponentHasSubmittedCode) {
       setGameOverReason("timeup_player2_submitted_only");
-      // Opponent submitted, Player 1 didn't. Player 1 loses.
-      // Pass empty P1 code and opponent's code (reference) to comparison.
-      setCode(''); // Ensure empty code is sent if P1 didn't submit
+      setCode('');
       handleSubmissionFinalization();
-    } else { // Neither submitted
+    } else {
       setGameOverReason("timeup_neither_submitted");
-      // Player loses entry fee (already deducted). No comparison needed.
       setGameState('gameOver');
     }
   };
@@ -408,16 +392,19 @@ export default function ArenaPage() {
     setShowLeaveConfirm(false);
     if (leaveConfirmType === 'search') {
         if (player && currentLobbyDetails) {
+            // Fee was already deducted, now it's forfeited.
+            // No refund for cancelling search.
             toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${currentLobbyDetails.entryFee} coins was forfeited.`, variant: "default" });
         }
-        resetGameState(true);
-        setGameOverReason("cancelledSearch");
+        resetGameState(true); // This should take them back to lobby selection
+        setGameOverReason("cancelledSearch"); // This reason might not need a visual screen, it's a state reset.
     } else if (leaveConfirmType === 'game') {
         if (player && currentLobbyDetails) {
+             // Fee was already deducted, now it's forfeited.
              toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${currentLobbyDetails.entryFee} coins was lost.`, variant: "destructive" });
         }
         setGameOverReason("forfeit_player1");
-        setGameState('gameOver'); // This will show the game over screen
+        setGameState('gameOver');
     }
     setLeaveConfirmType(null);
   };
@@ -452,7 +439,7 @@ function solve(params) {
 
 def solve(params):
   # Your brilliant Python code here!
-  # Example: n = params.get('n')
+  # Example: n = params.get('n') if isinstance(params, dict) else params
   # result = 0
   # ... your logic ...
   return result
@@ -467,31 +454,31 @@ def solve(params):
 
 #include <iostream>
 #include <vector>
-// Add other necessary headers
+// Add other necessary headers like <string>, <nlohmann/json.hpp> if using JSON
 
 // You might need to parse 'params' if it's a JSON string,
 // or adjust function signature based on problem.
-// For simplicity, this example assumes a basic structure.
 // The AI will look for the main problem-solving logic.
 
-// Example:
-// auto solve(const nlohmann::json& params) {
-//    int n = params["n"];
-//    int result = 0;
+// Example signature if params is a simple type or you parse it in main:
+// auto solve(/* appropriate C++ type for params */) {
 //    // ... your logic ...
 //    return result;
 // }
 
 int main() {
-  // If reading from stdin as per typical competitive programming:
+  // For competitive programming style, read from std::cin
+  // For Genkit evaluation, the 'solve' function or equivalent logic will be assessed.
+  // Example:
   // int n;
   // std::cin >> n;
-  // Call your main solving function here
+  // auto result = solve(n);
   // std::cout << result << std::endl;
   return 0;
 }
 
-// The AI will evaluate your primary C++ problem-solving logic.
+// The AI will evaluate your primary C++ problem-solving logic,
+// typically looking for a main function or a clearly defined solution function.
 `;
       default:
         return "// Select a language to see a placeholder.";
@@ -513,48 +500,53 @@ int main() {
 
         if (language === 'javascript') {
             try {
-                // Ensure the player's code defines a 'solve' function.
-                // This is a simplified execution model.
-                // WARNING: new Function() is a security risk with untrusted code.
-                // For a real app, use a sandboxed environment.
-                const playerFunction = new Function(`
+                const playerFunctionFactory = new Function(`
                     "use strict";
                     ${code}
                     if (typeof solve !== 'function') {
                         throw new Error('The "solve" function is not defined in your code.');
                     }
                     return solve;
-                `)();
+                `);
+                const playerSolveFunction = playerFunctionFactory();
+
+                if (typeof playerSolveFunction !== 'function') {
+                     throw new Error('The "solve" function is not defined or not a function in your code.');
+                }
 
                 let parsedInput = tc.input;
                 try {
-                    // Attempt to parse input if it looks like JSON
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
                     }
                 } catch (e) {
                     // Input is not JSON or invalid JSON, use as string
                 }
+                
+                let outputFromSolve;
+                try {
+                    outputFromSolve = playerSolveFunction(parsedInput);
+                } catch (solveError: any) {
+                    throw new Error(`Error in your solve function: ${solveError.message || String(solveError)}`);
+                }
+                
+                actualOutput = typeof outputFromSolve === 'object' ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
 
-                const output = playerFunction(parsedInput);
-                actualOutput = typeof output === 'object' ? JSON.stringify(output) : String(output);
-
-                // Normalize expected output for comparison if it's a stringified object/array
                 let normalizedExpectedOutput = tc.expectedOutput;
                  try {
+                    // Attempt to parse and re-stringify to normalize JSON strings (e.g., whitespace differences)
                     const parsedExpected = JSON.parse(tc.expectedOutput);
                     normalizedExpectedOutput = JSON.stringify(parsedExpected);
                 } catch (e) { /* not json, use as is */ }
-
 
                 status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
             } catch (error: any) {
                 status = 'error';
                 actualOutput = "Error during execution";
                 errorMessage = error.message || String(error);
-                console.error(`Error executing test case ${tc.name}:`, error);
+                console.error(`Error executing test case ${tc.name}:`, error, error.stack);
             }
-        } else { // Python, C++
+        } else {
             status = 'client_unsupported';
             actualOutput = `Client-side test for ${language} not supported. Submit for AI eval.`;
         }
@@ -566,8 +558,8 @@ int main() {
             actualOutput,
             status,
             errorMessage,
-            timeTaken: "N/A (mock)", // Mocked
-            memoryUsed: "N/A (mock)", // Mocked
+            timeTaken: "N/A", 
+            memoryUsed: "N/A",
         });
     }
     setTestResults(results);
@@ -612,7 +604,7 @@ int main() {
 
   if (gameState === 'searching') {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
+      <div className="flex flex-col items-center justify-center h-full text-center p-4">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
         <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
         <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
@@ -624,9 +616,9 @@ int main() {
     );
   }
 
-  if (gameState === 'submittingComparison') { // Updated state name
+  if (gameState === 'submittingComparison') {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
+      <div className="flex flex-col items-center justify-center h-full text-center p-4">
         <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
         <h2 className="text-2xl font-semibold text-foreground mb-2">Duel in Progress: AI Comparing Submissions...</h2>
         <p className="text-muted-foreground">Our AI is evaluating both your and your opponent's solutions to determine the victor.</p>
@@ -660,22 +652,24 @@ int main() {
             message = `The duel ended in a draw. Your entry fee of ${entryFeePaid} coins was consumed.`;
             icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case "timeup_player1_submitted_only": // P1 submitted, P2 timed out. Assume comparison still ran.
+        case "timeup_player1_submitted_only":
             title = comparisonResult?.winner === 'player1' ? "Victory by Default!" : "Close Call!";
+            const p1TimeoutWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
             message = comparisonResult?.winner === 'player1'
-                ? `Your opponent timed out after you submitted! You won ${ (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE)} coins.`
-                : `Your opponent timed out. The match was close, but considered a draw. You lost ${entryFeePaid} coins.`;
-            icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <AlertTriangle className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
+                ? `Your opponent timed out after you submitted! You won ${p1TimeoutWinnings} coins.`
+                : `Your opponent timed out. The match was considered a draw. You lost ${entryFeePaid} coins.`;
+            icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case "timeup_player2_submitted_only": // P2 submitted, P1 timed out.
+        case "timeup_player2_submitted_only": 
             title = "Defeat by Timeout";
             message = `You ran out of time after your opponent submitted. You lost ${entryFeePaid} coins.`;
             icon = <TimerIcon className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
-        case "timeup_both_submitted": // Both submitted, then time ran out. Result depends on comparison.
+        case "timeup_both_submitted":
              title = comparisonResult?.winner === 'player1' ? "Last Second Victory!" : (comparisonResult?.winner === 'player2' ? "Defeat at the Buzzer!" : "Draw at Timeout!");
+             const bothSubmittedWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
              message = comparisonResult?.winner === 'player1'
-                ? `You won the duel right at the end! ${ (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE)} coins awarded.`
+                ? `You won the duel right at the end! ${bothSubmittedWinnings} coins awarded.`
                 : (comparisonResult?.winner === 'player2' ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.` : `Duel ended in a draw at timeout. Your ${entryFeePaid} coins were consumed.`);
             icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : (comparisonResult?.winner === 'player2' ? <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />);
             break;
@@ -689,20 +683,20 @@ int main() {
             message = `You forfeited the match and lost ${entryFeePaid} coins.`;
             icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
             break;
-        case "cancelledSearch": // This state won't typically show the game over screen but reset. Added for completeness.
+        case "cancelledSearch": // Should not reach here with a full screen typically.
             title = "Search Cancelled";
-            message = `You left the lobby. Your entry fee was forfeited.`;
+            message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`;
             break;
         case "error":
             title = "Match Error";
-            message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins may have been lost or refunded depending on the issue.`;
+            message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins was lost.`;
             icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
     }
 
     return (
-      <div className="container mx-auto py-8 h-full flex flex-col justify-center">
-        <Card className={`shadow-xl ${gameOverReason === "comparison_player1_wins" ? 'border-green-500' : (gameOverReason === "comparison_player2_wins" || gameOverReason === "forfeit_player1" ? 'border-destructive' : 'border-border')}`}>
+      <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
+        <Card className={`shadow-xl ${gameOverReason === "comparison_player1_wins" ? 'border-green-500' : (gameOverReason === "comparison_player2_wins" || gameOverReason === "forfeit_player1" || gameOverReason === "error" ? 'border-destructive' : 'border-border')}`}>
           <CardHeader className="text-center">
             {icon}
             <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
@@ -778,7 +772,7 @@ int main() {
     }
     if (errorLoadingQuestion) {
        return (
-        <div className="flex flex-col items-center justify-center h-full text-center">
+        <div className="flex flex-col items-center justify-center h-full text-center p-4">
             <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
             <p className="text-xl text-destructive mb-2">{errorLoadingQuestion}</p>
             <Button onClick={() => resetGameState(true)}>Back to Lobbies</Button>
@@ -791,7 +785,6 @@ int main() {
 
     return (
       <div className="flex flex-col gap-4 h-full p-4 md:p-6">
-        {/* Player Info Header */}
         <Card className="shadow-md shrink-0">
           <CardContent className="p-3 flex justify-around items-center text-sm">
             <div className="flex items-center gap-2">
@@ -816,9 +809,7 @@ int main() {
           </CardContent>
         </Card>
 
-        {/* Problem and Solution Area */}
         <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
-            {/* Problem Display */}
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
               <CardHeader className="bg-card-foreground/5">
                   <div className="flex justify-between items-center">
@@ -831,7 +822,6 @@ int main() {
               </CardContent>
             </Card>
 
-            {/* Code Editor and Test Area */}
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
               <CardHeader className="bg-card-foreground/5">
                   <div className="flex justify-between items-center">
@@ -872,11 +862,10 @@ int main() {
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
                     placeholder={getCodePlaceholder(language)}
-                    className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[250px]" // Adjusted min-height
+                    className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[300px]"
                     disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}
                   />
               </CardContent>
-              {/* Test Cases Section */}
               <Accordion type="single" collapsible className="w-full px-4 pb-2">
                 <AccordionItem value="test-cases">
                     <AccordionTrigger className="text-md hover:no-underline py-2">
@@ -953,21 +942,20 @@ int main() {
                     </AccordionContent>
                 </AccordionItem>
               </Accordion>
-              {/* Action Buttons */}
               <div className="p-4 border-t flex flex-col gap-2">
                   <Button
                     onClick={handleSubmitCode}
                     disabled={isComparing || playerHasSubmittedCode || !code.trim() || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'}
                     className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                   >
-                  {isComparing || gameStateRef.current === 'submittingComparison' ? (<Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (<Send className="mr-2 h-4 w-4" />)}
+                  {gameStateRef.current === 'submittingComparison' ? (<Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (<Send className="mr-2 h-4 w-4" />)}
                   {playerHasSubmittedCode ? "Code Submitted" : "Submit for Final AI Duel"}
                   </Button>
                   <Button variant="outline" onClick={() => triggerLeave('game')} disabled={isComparing || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'} className="w-full">
                       <Flag className="mr-2 h-4 w-4" /> Forfeit Match
                   </Button>
                   {timeRemaining === 0 && !playerHasSubmittedCode && (
-                   <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Your solution will be auto-submitted if any code is present, or considered a non-submission.</p>
+                   <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Your solution will be considered a non-submission.</p>
                   )}
               </div>
             </Card>
@@ -977,14 +965,14 @@ int main() {
   }
 
   return (
-      <div className="flex flex-col items-center justify-center h-full">
+      <div className="flex flex-col items-center justify-center h-full p-4">
         <p className="mb-4">An unexpected state has occurred.</p>
         <Button onClick={() => resetGameState(true)}>Return to Lobby Selection</Button>
       </div>
   );
 }
 
-//ArenaLeaveConfirmationDialog remains the same as provided previously
+
 export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | null }) {
   if (!type) return null;
 
@@ -1012,3 +1000,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
