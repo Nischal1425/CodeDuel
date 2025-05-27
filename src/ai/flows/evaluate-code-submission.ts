@@ -10,7 +10,7 @@
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
 
-export const EvaluateCodeSubmissionInputSchema = z.object({
+const EvaluateCodeSubmissionInputSchema = z.object({
   playerCode: z.string().describe("The code submitted by the player."),
   referenceSolution: z.string().describe("The official reference solution for the coding problem."),
   problemStatement: z.string().describe("The full problem statement of the coding challenge."),
@@ -19,7 +19,7 @@ export const EvaluateCodeSubmissionInputSchema = z.object({
 });
 export type EvaluateCodeSubmissionInput = z.infer<typeof EvaluateCodeSubmissionInputSchema>;
 
-export const EvaluateCodeSubmissionOutputSchema = z.object({
+const EvaluateCodeSubmissionOutputSchema = z.object({
   isPotentiallyCorrect: z.boolean().describe("AI's assessment of whether the player's code is functionally correct for the given problem. True if likely correct, false otherwise."),
   correctnessExplanation: z.string().describe("A brief explanation for the correctness assessment, highlighting why it's considered correct or pointing out specific flaws if incorrect."),
   similarityToRefSolutionScore: z.number().min(0).max(1).describe("A score (0-1) indicating the structural and logical similarity of the player's code to the reference solution. Higher means more similar. This is not just about character-by-character match but algorithmic approach."),
