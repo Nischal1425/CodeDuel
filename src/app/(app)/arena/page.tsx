@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon } from 'lucide-react'; // Added CoinsIcon
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon } from 'lucide-react'; // Added TimerIcon
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
@@ -554,5 +554,7 @@ export default function ArenaPage() {
   );
 }
 
+
+    
 
     
