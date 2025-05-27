@@ -2,13 +2,14 @@
 "use client";
 
 import type { FormEvent } from 'react';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut } from 'lucide-react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
@@ -29,6 +30,8 @@ const COMMISSION_RATE = 0.05; // 5% commission
 
 type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingEvaluation' | 'gameOver';
 type DifficultyLobby = 'easy' | 'medium' | 'hard';
+type GameOverReason = "solved" | "incorrect" | "timeup" | "error" | "forfeit" | "cancelledSearch";
+
 
 interface LobbyInfo {
   name: DifficultyLobby;
@@ -79,6 +82,10 @@ export default function ArenaPage() {
   const router = useRouter();
 
   const [gameState, setGameState] = useState<GameState>('selectingLobby');
+  const gameStateRef = useRef(gameState); // Ref to track gameState for timeouts
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+
+
   const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
   const [currentLobbyDetails, setCurrentLobbyDetails] = useState<LobbyInfo | null>(null);
   const [question, setQuestion] = useState<GenerateCodingChallengeOutput | null>(null);
@@ -89,28 +96,40 @@ export default function ArenaPage() {
   
   const [code, setCode] = useState<string>('');
   const [language, setLanguage] = useState<string>(DEFAULT_LANGUAGE);
-  const [isSubmitting, setIsSubmitting] = useState(false); 
+  const [isSubmittingCode, setIsSubmittingCode] = useState(false); 
   const [submissionResult, setSubmissionResult] = useState<EvaluateCodeSubmissionOutput | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0); 
-  const [gameOverReason, setGameOverReason] = useState<"solved" | "incorrect" | "timeup" | "error">("incorrect");
+  const [gameOverReason, setGameOverReason] = useState<GameOverReason>("incorrect");
+
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [leaveConfirmType, setLeaveConfirmType] = useState<'search' | 'game' | null>(null);
 
 
-  const resetGameState = () => {
-    setGameState('selectingLobby');
-    setSelectedLobbyName(null);
-    setCurrentLobbyDetails(null);
+  const resetGameState = (backToLobbySelection = true) => {
+    if (backToLobbySelection) {
+      setGameState('selectingLobby');
+      setSelectedLobbyName(null);
+      setCurrentLobbyDetails(null);
+    }
     setQuestion(null);
     setMockOpponent(null);
     setCode('');
     setSubmissionResult(null);
-    setIsSubmitting(false);
+    setIsSubmittingCode(false);
     setTimeRemaining(0);
     setErrorLoadingQuestion(null);
     setGameOverReason("incorrect");
+    setShowLeaveConfirm(false);
+    setLeaveConfirmType(null);
   };
 
   const fetchQuestionForLobby = useCallback(async (lobbyInfo: LobbyInfo) => {
-    if (!player) return;
+    if (!player || gameStateRef.current !== 'searching') { // Check ref here
+        if (gameStateRef.current !== 'searching') {
+            console.log("Search cancelled, not fetching question.");
+        }
+        return;
+    }
 
     setIsLoadingQuestion(true);
     setErrorLoadingQuestion(null);
@@ -118,6 +137,17 @@ export default function ArenaPage() {
 
     try {
       const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
+      if (gameStateRef.current !== 'searching') { // Double check after await
+           console.log("Search cancelled during question fetch.");
+           // Potentially refund fee if it was already deducted and user cancelled before question load
+            if (player && lobbyInfo) {
+                const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
+                setPlayer(refundedPlayer);
+                toast({ title: "Search Cancelled", description: `Entry fee of ${lobbyInfo.entryFee} coins refunded.`, variant: "default" });
+            }
+           resetGameState(true); // Go back to lobby selection
+           return;
+      }
       setQuestion(challenge);
       setTimeRemaining(lobbyInfo.baseTime * 60); 
       setGameState('inGame');
@@ -129,7 +159,6 @@ export default function ArenaPage() {
         description: "Could not fetch a new coding challenge.",
         variant: "destructive",
       });
-      // Refund entry fee if question fails to load after fee deduction
       if (player && currentLobbyDetails) {
         const refundedPlayer = { ...player, coins: player.coins + currentLobbyDetails.entryFee };
         setPlayer(refundedPlayer);
@@ -186,14 +215,19 @@ export default function ArenaPage() {
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
     
+    // Ensure fetchQuestionForLobby is only called if still in 'searching' state
     setTimeout(() => {
-      setMockOpponent(mockOpponentDetails);
-      toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
-      fetchQuestionForLobby(lobbyInfo);
+      if (gameStateRef.current === 'searching') { // Use ref here
+        setMockOpponent(mockOpponentDetails);
+        toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
+        fetchQuestionForLobby(lobbyInfo);
+      } else {
+        console.log("Matchmaking timeout fired, but user already left 'searching' state.");
+      }
     }, 1500 + Math.random() * 1000); 
   };
   
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmitCode = async (e: FormEvent) => {
     e.preventDefault();
     if (!code.trim()) {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
@@ -204,7 +238,7 @@ export default function ArenaPage() {
         return;
     }
 
-    setIsSubmitting(true);
+    setIsSubmittingCode(true);
     setGameState('submittingEvaluation'); 
     setSubmissionResult(null);
     let evalSuccess = false;
@@ -271,26 +305,53 @@ export default function ArenaPage() {
         }
     } finally {
       setGameState('gameOver');
-      setIsSubmitting(false); 
+      setIsSubmittingCode(false); 
     }
   };
 
   const handleTimeUp = () => {
-    if (!player || !currentLobbyDetails) return;
+    if (!player || !currentLobbyDetails || gameState !== 'inGame') return;
 
     toast({
       title: "Time's Up!",
       description: "The timer for this challenge has expired.",
       variant: "destructive",
     });
-    setIsSubmitting(true); 
+    // setIsSubmittingCode(true); // Don't set this, as it's not a user submission
     setGameOverReason("timeup");
     setGameState('gameOver');
   };
 
+  const handleLeaveConfirm = () => {
+    setShowLeaveConfirm(false);
+    if (leaveConfirmType === 'search') {
+        if (player && currentLobbyDetails) {
+            // Fee was already deducted, so "losing" it is implicit by not refunding.
+            // If we wanted to refund on cancel search but not on question load, logic would be more complex.
+            // For now, fee is lost if search is cancelled after initial deduction.
+            toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${currentLobbyDetails.entryFee} coins was forfeited.`, variant: "default" });
+        }
+        resetGameState(true); // Go back to lobby selection
+        setGameOverReason("cancelledSearch"); // Special reason if needed, or just reset
+    } else if (leaveConfirmType === 'game') {
+        if (player && currentLobbyDetails) {
+             toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${currentLobbyDetails.entryFee} coins was lost.`, variant: "destructive" });
+        }
+        setGameOverReason("forfeit");
+        setGameState('gameOver');
+    }
+    setLeaveConfirmType(null);
+  };
+
+  const triggerLeave = (type: 'search' | 'game') => {
+    setLeaveConfirmType(type);
+    setShowLeaveConfirm(true);
+  };
+
+
   useEffect(() => {
     if (!player && gameState !== 'selectingLobby') {
-        resetGameState();
+        resetGameState(true);
     }
   }, [player, gameState]);
 
@@ -306,7 +367,7 @@ export default function ArenaPage() {
 
   if (gameState === 'selectingLobby') {
     return (
-      <div className="container mx-auto py-8">
+      <div className="container mx-auto py-8 h-full flex flex-col justify-center">
         <Card className="mb-8 shadow-lg">
           <CardHeader className="text-center">
             <Swords className="h-16 w-16 mx-auto text-primary mb-4"/>
@@ -330,6 +391,9 @@ export default function ArenaPage() {
         <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
         <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
         <p className="text-sm text-muted-foreground mt-1">Entry fee: {currentLobbyDetails?.entryFee} <CoinsIcon className="inline h-3 w-3 text-yellow-500 align-baseline" /></p>
+        <Button variant="outline" onClick={() => triggerLeave('search')} className="mt-6">
+            <LogOut className="mr-2 h-4 w-4" /> Cancel Search & Leave Lobby
+        </Button>
       </div>
     );
   }
@@ -350,37 +414,57 @@ export default function ArenaPage() {
     const entryFeePaid = currentLobbyDetails?.entryFee || 0;
     
     let summaryMessage = "";
-    if (gameOverReason === 'solved') {
-        const pot = entryFeePaid * 2;
-        const commission = Math.floor(pot * COMMISSION_RATE);
-        const netWinnings = pot - commission;
-        summaryMessage = `You won! ${netWinnings} coins added to your balance.`;
-    } else if (gameOverReason === 'timeup') {
-        summaryMessage = `You ran out of time. You lost ${entryFeePaid} coins.`;
-    } else if (gameOverReason === 'incorrect') {
-        summaryMessage = `AI assessed your solution as incorrect. You lost ${entryFeePaid} coins.`;
-    } else {
-        summaryMessage = `Match ended. Status: ${gameOverReason}.`;
+    let title = "";
+    let icon = null;
+
+    switch(gameOverReason) {
+        case 'solved':
+            const pot = entryFeePaid * 2;
+            const commission = Math.floor(pot * COMMISSION_RATE);
+            const netWinnings = pot - commission;
+            summaryMessage = `You won! ${netWinnings} coins added to your balance.`;
+            title = "Victory!";
+            icon = <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />;
+            break;
+        case 'incorrect':
+            summaryMessage = `AI assessed your solution as incorrect. You lost ${entryFeePaid} coins.`;
+            title = "Better Luck Next Time!";
+            icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
+            break;
+        case 'timeup':
+            summaryMessage = `You ran out of time. You lost ${entryFeePaid} coins.`;
+            title = "Time's Up!";
+            icon = <TimerIcon className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
+            break;
+        case 'forfeit':
+            summaryMessage = `You forfeited the match. You lost ${entryFeePaid} coins.`;
+            title = "Match Forfeited";
+            icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
+            break;
+        case 'error': // Should ideally not be hit if errors are handled by refunding/resetting
+            summaryMessage = `An error occurred. Your entry fee of ${entryFeePaid} coins may have been lost or refunded.`;
+            title = "Match Ended Due to Error";
+            icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
+            break;
+        default:
+            summaryMessage = `Match ended. You lost ${entryFeePaid} coins.`;
+            title = "Match Over";
+            icon = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
     }
 
 
     return (
-      <div className="container mx-auto py-8">
+      <div className="container mx-auto py-8 h-full flex flex-col justify-center">
         <Card className={`shadow-xl ${resultIsSuccess ? 'border-green-500' : 'border-destructive'}`}>
           <CardHeader className="text-center">
-            {gameOverReason === 'solved' && <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />}
-            {gameOverReason === 'incorrect' && <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />}
-            {gameOverReason === 'timeup' && <TimerIcon className="h-16 w-16 text-yellow-500 mx-auto mb-4" />}
-            
-            <CardTitle className="text-3xl font-bold mb-2">
-              {gameOverReason === 'solved' ? "Victory!" : (gameOverReason === 'timeup' ? "Time's Up!" : "Better Luck Next Time!")}
-            </CardTitle>
+            {icon}
+            <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
             <CardDescription className="text-lg text-muted-foreground">
               {summaryMessage}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {submissionResult && (
+            {submissionResult && gameOverReason !== 'forfeit' && gameOverReason !== 'timeup' && (
               <Card className="bg-muted/50">
                 <CardHeader>
                   <CardTitle className="text-xl flex items-center"><Brain className="mr-2 h-5 w-5 text-primary"/> AI Analysis Report</CardTitle>
@@ -411,7 +495,7 @@ export default function ArenaPage() {
              <div className="text-center text-muted-foreground">
                 Your coins: {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
             </div>
-            <Button onClick={resetGameState} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+            <Button onClick={() => resetGameState(true)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
              Play Again (Back to Lobbies)
             </Button>
           </CardContent>
@@ -435,7 +519,7 @@ export default function ArenaPage() {
         <div className="flex flex-col items-center justify-center h-full text-center">
             <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
             <p className="text-xl text-destructive mb-2">{errorLoadingQuestion}</p>
-            <Button onClick={resetGameState}>Back to Lobbies</Button>
+            <Button onClick={() => resetGameState(true)}>Back to Lobbies</Button>
         </div>
        );
     }
@@ -444,36 +528,28 @@ export default function ArenaPage() {
     }
     
     const codePlaceholder = `// Language: ${language}
-// Difficulty: ${question.difficulty}
+// Difficulty: ${question.difficulty} (Lobby: ${currentLobbyDetails.name})
+// Problem Type: ${question.problemStatement.substring(0,50)}... 
 // Remember to define your main function, e.g.:
 
 function solve(params) {
-  // Your brilliant code here
-
-  // Example:
-  // const n = params.n;
+  // Your brilliant code here!
+  // Example structure if problem involves numbers n and m:
+  // const n = params.n; 
   // const m = params.m;
-  // let sumNonDivisible = 0;
-  // let sumDivisible = 0;
-  // for (let i = 1; i <= n; i++) {
-  //   if (i % m !== 0) {
-  //     sumNonDivisible += i;
-  //   } else {
-  //     sumDivisible += i;
-  //   }
-  // }
-  // return sumNonDivisible - sumDivisible;
-
+  // let result = 0;
+  // /* ... your logic ... */
   return result;
 }
 
 // The AI will evaluate the logic within your 'solve' function
 // or the primary problem-solving part of your code.
+// Ensure your return type matches the problem's output specification.
 `;
 
     return (
-      <div className="flex flex-col gap-4 h-[calc(100vh-8rem)] max-h-[calc(100vh-8rem)]">
-        <Card className="shadow-md">
+      <div className="flex flex-col gap-4 h-full p-4 md:p-6">
+        <Card className="shadow-md shrink-0">
           <CardContent className="p-3 flex justify-around items-center text-sm">
             <div className="flex items-center gap-2">
               <UserSquare2 className="h-8 w-8 text-blue-500" />
@@ -526,7 +602,7 @@ function solve(params) {
                         </Tooltip>
                     </TooltipProvider>
                 </div>
-                <Select value={language} onValueChange={setLanguage} disabled={isSubmitting || timeRemaining === 0}>
+                <Select value={language} onValueChange={setLanguage} disabled={isSubmittingCode || timeRemaining === 0}>
                     <SelectTrigger className="w-[180px] bg-background">
                     <SelectValue placeholder="Select language" />
                     </SelectTrigger>
@@ -545,22 +621,25 @@ function solve(params) {
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder={codePlaceholder}
-                className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary h-[calc(100%-100px)]"
-                disabled={isSubmitting || timeRemaining === 0}
+                className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[300px]"
+                disabled={isSubmittingCode || timeRemaining === 0}
                 />
             </CardContent>
-            <div className="p-4 border-t">
+            <div className="p-4 border-t flex flex-col gap-2">
                 <Button 
-                onClick={handleSubmit} 
-                disabled={isSubmitting || !code.trim() || timeRemaining === 0}
+                onClick={handleSubmitCode} 
+                disabled={isSubmittingCode || !code.trim() || timeRemaining === 0 || gameState === 'submittingEvaluation'}
                 className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
-                {isSubmitting ? (
+                {gameState === 'submittingEvaluation' ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
                     <Send className="mr-2 h-4 w-4" />
                 )}
                 Submit for AI Evaluation
+                </Button>
+                 <Button variant="outline" onClick={() => triggerLeave('game')} disabled={isSubmittingCode || timeRemaining === 0 || gameState === 'submittingEvaluation'} className="w-full">
+                    <Flag className="mr-2 h-4 w-4" /> Forfeit Match
                 </Button>
                 {timeRemaining === 0 && (
                  <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Submission disabled.</p>
@@ -571,10 +650,41 @@ function solve(params) {
       </div>
     );
   }
-  
+
+  // Fallback for unhandled states or errors - should ideally not be reached
   return (
-      <div className="flex items-center justify-center h-full">
-        <Button onClick={resetGameState}>Return to Lobby Selection</Button>
+      <div className="flex flex-col items-center justify-center h-full">
+        <p className="mb-4">An unexpected state has occurred.</p>
+        <Button onClick={() => resetGameState(true)}>Return to Lobby Selection</Button>
       </div>
+  );
+}
+
+// Confirmation Dialog for Leaving Lobby/Game
+export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | null }) {
+  if (!type) return null;
+  
+  const title = type === 'search' ? "Cancel Search?" : "Forfeit Match?";
+  const description = type === 'search' 
+    ? "Are you sure you want to cancel the search and leave the lobby? Your entry fee will be forfeited."
+    : "Are you sure you want to forfeit the match? This will count as a loss, and your entry fee will be forfeited.";
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {description}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={() => onOpenChange(false)}>Stay</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+            {type === 'search' ? "Leave Lobby" : "Forfeit"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
