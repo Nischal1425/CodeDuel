@@ -7,18 +7,23 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2 } from 'lucide-react';
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain } from 'lucide-react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
+import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
+import { evaluateCodeSubmission } from '@/ai/flows/evaluate-code-submission';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { GameTimer } from './_components/GameTimer';
 import { ProblemDisplay } from './_components/ProblemDisplay';
 import type { Player } from '@/types';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const DEFAULT_LANGUAGE = "javascript";
 
-type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'gameOver';
+type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingEvaluation' | 'gameOver';
 type DifficultyLobby = 'easy' | 'medium' | 'hard';
 
 interface LobbyInfo {
@@ -32,9 +37,9 @@ interface LobbyInfo {
 }
 
 const LOBBIES: LobbyInfo[] = [
-  { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 3, mockPlayerCount: "150+", mockWaitTime: "<15s" },
-  { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 5, mockPlayerCount: "80+", mockWaitTime: "<30s" },
-  { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 10, mockPlayerCount: "20+", mockWaitTime: "<60s" },
+  { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, mockPlayerCount: "150+", mockWaitTime: "<15s" },
+  { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 10, mockPlayerCount: "80+", mockWaitTime: "<30s" },
+  { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, mockPlayerCount: "20+", mockWaitTime: "<60s" },
 ];
 
 function LobbyCard({ lobby, onSelectLobby }: { lobby: LobbyInfo; onSelectLobby: (difficulty: DifficultyLobby) => void }) {
@@ -67,14 +72,16 @@ export default function ArenaPage() {
   const [question, setQuestion] = useState<GenerateCodingChallengeOutput | null>(null);
   const [mockOpponent, setMockOpponent] = useState<Player | null>(null);
   
-  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false); // For question fetching specifically
+  const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
   const [errorLoadingQuestion, setErrorLoadingQuestion] = useState<string | null>(null);
   
   const [code, setCode] = useState<string>('');
   const [language, setLanguage] = useState<string>(DEFAULT_LANGUAGE);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'success' | 'error'>('idle');
-  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false); // General submission lock
+  const [submissionResult, setSubmissionResult] = useState<EvaluateCodeSubmissionOutput | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState(0); // Controlled by GameTimer, but also held here
+  const [gameOverReason, setGameOverReason] = useState<"solved" | "incorrect" | "timeup" | "error">("incorrect");
+
 
   const resetGameState = () => {
     setGameState('selectingLobby');
@@ -82,10 +89,11 @@ export default function ArenaPage() {
     setQuestion(null);
     setMockOpponent(null);
     setCode('');
-    setSubmissionStatus('idle');
+    setSubmissionResult(null);
     setIsSubmitting(false);
     setTimeRemaining(0);
     setErrorLoadingQuestion(null);
+    setGameOverReason("incorrect");
   };
 
   const fetchQuestionForLobby = useCallback(async (lobbyName: DifficultyLobby) => {
@@ -96,10 +104,11 @@ export default function ArenaPage() {
     setQuestion(null);
 
     try {
-      const challenge = await generateCodingChallenge({ playerRank: player.rank });
+      // Pass both playerRank and selected lobby as targetDifficulty
+      const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyName });
       setQuestion(challenge);
       const lobbyDetails = LOBBIES.find(l => l.name === lobbyName);
-      setTimeRemaining((lobbyDetails?.baseTime || 5) * 60); // Use baseTime from lobby
+      setTimeRemaining((lobbyDetails?.baseTime || 5) * 60); 
       setGameState('inGame');
     } catch (error) {
       console.error("Failed to generate coding challenge:", error);
@@ -109,7 +118,7 @@ export default function ArenaPage() {
         description: "Could not fetch a new coding challenge.",
         variant: "destructive",
       });
-      setGameState('error'); // Or back to 'selectingLobby'
+      setGameState('selectingLobby'); // Go back to lobby selection on error
     } finally {
       setIsLoadingQuestion(false);
     }
@@ -123,14 +132,13 @@ export default function ArenaPage() {
     setSelectedLobby(lobbyName);
     setGameState('searching');
 
-    // Mock matchmaking
-    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); // Similar rank
+    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2);
     const mockOpponentDetails: Player = {
       id: `bot_${Date.now()}`,
       username: `DuelBot${Math.floor(Math.random() * 1000)}`,
       coins: Math.floor(Math.random() * 5000) + 500,
       rank: opponentRank,
-      rating: opponentRank * 75 + Math.floor(Math.random() * 100), // Mock rating based on rank
+      rating: opponentRank * 75 + Math.floor(Math.random() * 100),
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
     
@@ -138,7 +146,7 @@ export default function ArenaPage() {
       setMockOpponent(mockOpponentDetails);
       toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
       fetchQuestionForLobby(lobbyName);
-    }, 2500 + Math.random() * 1500); // Simulate search time
+    }, 1500 + Math.random() * 1000); // Shorter search time
   };
   
   const handleSubmit = async (e: FormEvent) => {
@@ -147,35 +155,67 @@ export default function ArenaPage() {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
       return;
     }
-    setIsSubmitting(true);
-    setSubmissionStatus('idle');
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate submission check
-    
-    const isCorrect = Math.random() > 0.3; 
-    if (isCorrect) {
-      setSubmissionStatus('success');
-      toast({ title: "Submission Successful!", description: "Your solution was correct.", className: "bg-green-500 text-white" });
-      // In a real game, update player stats, coins, etc.
-    } else {
-      setSubmissionStatus('error');
-      toast({ title: "Submission Failed", description: "Your solution was incorrect. Try again!", variant: "destructive" });
+    if (!question || !question.solution || !selectedLobby) {
+        toast({ title: "Error", description: "Game data missing. Cannot submit.", variant: "destructive" });
+        return;
     }
-    setIsSubmitting(false);
-    setGameState('gameOver'); // Transition to game over state
+
+    setIsSubmitting(true);
+    setGameState('submittingEvaluation'); // New state for AI evaluation
+    setSubmissionResult(null);
+
+    try {
+      const evaluationInput = {
+        playerCode: code,
+        referenceSolution: question.solution,
+        problemStatement: question.problemStatement,
+        language: language,
+        difficulty: selectedLobby,
+      };
+      const evaluation = await evaluateCodeSubmission(evaluationInput);
+      setSubmissionResult(evaluation);
+
+      if (evaluation.isPotentiallyCorrect) {
+        setGameOverReason("solved");
+        toast({ title: "Submission Processed!", description: "AI assessed your solution as correct!", className: "bg-green-500 text-white" });
+      } else {
+        setGameOverReason("incorrect");
+        toast({ title: "Submission Processed", description: "AI assessed your solution. See feedback below.", variant: "destructive" });
+      }
+    } catch (error) {
+        console.error("Error during code evaluation:", error);
+        toast({ title: "Evaluation Error", description: "Could not evaluate your submission. Mocking result.", variant: "destructive" });
+        // Fallback to mock evaluation if AI fails
+        const mockEvalResult: EvaluateCodeSubmissionOutput = {
+            isPotentiallyCorrect: Math.random() > 0.5,
+            correctnessExplanation: "AI evaluation failed, this is a mock result.",
+            similarityToRefSolutionScore: Math.random(),
+            similarityToRefSolutionExplanation: "N/A due to evaluation error.",
+            estimatedTimeComplexity: "N/A",
+            estimatedSpaceComplexity: "N/A",
+            codeQualityFeedback: "Unable to provide AI feedback due to an error.",
+            overallAssessment: "Evaluation could not be completed."
+        };
+        setSubmissionResult(mockEvalResult);
+        setGameOverReason(mockEvalResult.isPotentiallyCorrect ? "solved" : "incorrect");
+    } finally {
+      setGameState('gameOver');
+      setIsSubmitting(false); 
+    }
   };
 
   const handleTimeUp = () => {
     toast({
       title: "Time's Up!",
-      description: "The timer for this challenge has expired. Opponent wins by default.",
+      description: "The timer for this challenge has expired.",
       variant: "destructive",
     });
-    setIsSubmitting(true); // Disable further submissions
-    setGameState('gameOver'); // Transition to game over state
+    setIsSubmitting(true); 
+    setGameOverReason("timeup");
+    setGameState('gameOver');
   };
 
   useEffect(() => {
-    // Reset to lobby selection if player data is lost or on initial mount without prior state
     if (!player && gameState !== 'selectingLobby') {
         resetGameState();
     }
@@ -216,39 +256,74 @@ export default function ArenaPage() {
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
         <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
         <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobby}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
-        <p className="text-sm text-muted-foreground mt-1">This shouldn't take long!</p>
       </div>
     );
   }
 
-  if (gameState === 'error') {
+  if (gameState === 'submittingEvaluation') {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center">
-        <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
-        <p className="text-xl text-destructive mb-2">{errorLoadingQuestion || "An unexpected error occurred."}</p>
-        <Button onClick={resetGameState}>Back to Lobbies</Button>
+        <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
+        <h2 className="text-2xl font-semibold text-foreground mb-2">AI Analyzing Your Code...</h2>
+        <p className="text-muted-foreground">Our AI is evaluating your solution for correctness, complexity, and quality.</p>
+        <p className="text-sm text-muted-foreground mt-1">This might take a few moments.</p>
       </div>
     );
   }
   
   if (gameState === 'gameOver') {
+    const resultIsSuccess = gameOverReason === "solved";
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center">
-        {submissionStatus === 'success' && <CheckCircle className="h-16 w-16 text-green-500 mb-4" />}
-        {submissionStatus === 'error' && <AlertTriangle className="h-16 w-16 text-destructive mb-4" />}
-        {timeRemaining === 0 && submissionStatus === 'idle' && <AlertTriangle className="h-16 w-16 text-yellow-500 mb-4" />}
-        
-        <h2 className="text-3xl font-bold mb-3">
-          {submissionStatus === 'success' ? "Victory!" : "Defeat!"}
-        </h2>
-        <p className="text-lg text-muted-foreground mb-6">
-          {submissionStatus === 'success' ? "You solved the problem correctly!" : 
-           (timeRemaining === 0 && submissionStatus === 'idle' ? "Time ran out!" : "Your solution was incorrect.")}
-        </p>
-        {/* Could show coin changes or rating changes here */}
-        <Button onClick={resetGameState} className="bg-primary hover:bg-primary/90 text-primary-foreground">
-          Play Again (Back to Lobbies)
-        </Button>
+      <div className="container mx-auto py-8">
+        <Card className={`shadow-xl ${resultIsSuccess ? 'border-green-500' : 'border-destructive'}`}>
+          <CardHeader className="text-center">
+            {gameOverReason === 'solved' && <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />}
+            {gameOverReason === 'incorrect' && <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />}
+            {gameOverReason === 'timeup' && <TimerIcon className="h-16 w-16 text-yellow-500 mx-auto mb-4" />}
+            
+            <CardTitle className="text-3xl font-bold mb-2">
+              {gameOverReason === 'solved' ? "Victory!" : (gameOverReason === 'timeup' ? "Time's Up!" : "Defeat!")}
+            </CardTitle>
+            <CardDescription className="text-lg text-muted-foreground">
+              {gameOverReason === 'solved' ? "The AI assessed your solution as correct!" : 
+               gameOverReason === 'timeup' ? "You ran out of time." : 
+               "The AI assessed your solution. See feedback below."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {submissionResult && (
+              <Card className="bg-muted/50">
+                <CardHeader>
+                  <CardTitle className="text-xl flex items-center"><Brain className="mr-2 h-5 w-5 text-primary"/> AI Analysis Report</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                        <span className="font-medium text-foreground">Overall Assessment:</span>
+                        <Badge variant={submissionResult.isPotentiallyCorrect ? "default" : "destructive"} className={submissionResult.isPotentiallyCorrect ? "bg-green-500 hover:bg-green-600 text-white" : ""}>
+                            {submissionResult.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}
+                        </Badge>
+                    </div>
+                    <p><span className="font-medium text-foreground">Explanation:</span> {submissionResult.correctnessExplanation}</p>
+                    <p><span className="font-medium text-foreground">Summary:</span> {submissionResult.overallAssessment}</p>
+                    
+                    <h4 className="font-semibold text-md text-foreground pt-2">Code Details:</h4>
+                    <p><span className="font-medium">Similarity to Reference:</span> {(submissionResult.similarityToRefSolutionScore * 100).toFixed(0)}%</p>
+                    <p><span className="font-medium">Similarity Explanation:</span> {submissionResult.similarityToRefSolutionExplanation}</p>
+                    <p><span className="font-medium">Est. Time Complexity:</span> {submissionResult.estimatedTimeComplexity}</p>
+                    <p><span className="font-medium">Est. Space Complexity:</span> {submissionResult.estimatedSpaceComplexity}</p>
+                    
+                    <h4 className="font-semibold text-md text-foreground pt-2">Quality Feedback:</h4>
+                    <ScrollArea className="h-24 p-2 border rounded-md bg-background">
+                        <p className="whitespace-pre-wrap">{submissionResult.codeQualityFeedback}</p>
+                    </ScrollArea>
+                </CardContent>
+              </Card>
+            )}
+            <Button onClick={resetGameState} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+             Play Again (Back to Lobbies)
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -263,13 +338,21 @@ export default function ArenaPage() {
         </div>
       );
     }
+    if (errorLoadingQuestion) {
+       return (
+        <div className="flex flex-col items-center justify-center h-full text-center">
+            <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
+            <p className="text-xl text-destructive mb-2">{errorLoadingQuestion}</p>
+            <Button onClick={resetGameState}>Back to Lobbies</Button>
+        </div>
+       );
+    }
     if (!question || !mockOpponent) {
-       return <div className="flex items-center justify-center h-full"><p>Preparing match...</p></div>;
+       return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
     }
 
     return (
       <div className="flex flex-col gap-4 h-[calc(100vh-8rem)] max-h-[calc(100vh-8rem)]">
-        {/* Player vs Opponent Info Bar */}
         <Card className="shadow-md">
           <CardContent className="p-3 flex justify-around items-center text-sm">
             <div className="flex items-center gap-2">
@@ -306,14 +389,26 @@ export default function ArenaPage() {
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
             <CardHeader className="bg-card-foreground/5">
                 <div className="flex justify-between items-center">
-                <CardTitle className="text-2xl">Your Solution</CardTitle>
-                <Select value={language} onValueChange={setLanguage}>
+                 <div className="flex items-center gap-2">
+                    <CardTitle className="text-2xl">Your Solution</CardTitle>
+                    <TooltipProvider>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <HelpCircle className="h-5 w-5 text-muted-foreground cursor-help" />
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom" className="max-w-xs">
+                                <p>The AI will analyze your code for correctness, efficiency (time/space complexity), and quality compared to the reference solution.</p>
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+                <Select value={language} onValueChange={setLanguage} disabled={isSubmitting || timeRemaining === 0}>
                     <SelectTrigger className="w-[180px] bg-background">
                     <SelectValue placeholder="Select language" />
                     </SelectTrigger>
                     <SelectContent>
                     <SelectItem value="javascript">JavaScript</SelectItem>
-                    <SelectItem value="python">Python</SelectItem>
+                    <SelectItem value="python" disabled>Python (soon)</SelectItem>
                     <SelectItem value="java" disabled>Java (soon)</SelectItem>
                     <SelectItem value="cpp" disabled>C++ (soon)</SelectItem>
                     </SelectContent>
@@ -325,7 +420,7 @@ export default function ArenaPage() {
                 <Textarea
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder={`// Start coding in ${language}...`}
+                placeholder={`// Start coding in ${language}...\n// Problem Difficulty: ${question.difficulty}\n// Reference solution will be in JavaScript.`}
                 className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary h-[calc(100%-100px)]"
                 disabled={isSubmitting || timeRemaining === 0}
                 />
@@ -341,16 +436,10 @@ export default function ArenaPage() {
                 ) : (
                     <Send className="mr-2 h-4 w-4" />
                 )}
-                Submit Solution
+                Submit for AI Evaluation
                 </Button>
-                {submissionStatus === 'success' && (
-                <p className="mt-2 text-sm text-green-600 flex items-center"><CheckCircle className="mr-1 h-4 w-4" />Correct! Well done.</p>
-                )}
-                {submissionStatus === 'error' && (
-                <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Incorrect. Keep trying!</p>
-                )}
-                {timeRemaining === 0 && submissionStatus === 'idle' && (
-                <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Submission disabled.</p>
+                {timeRemaining === 0 && (
+                 <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Submission disabled.</p>
                 )}
             </div>
             </Card>
@@ -359,13 +448,9 @@ export default function ArenaPage() {
     );
   }
   
-  // Fallback for any unexpected state, though should be covered
   return (
       <div className="flex items-center justify-center h-full">
         <Button onClick={resetGameState}>Return to Lobby Selection</Button>
       </div>
   );
 }
-
-
-    

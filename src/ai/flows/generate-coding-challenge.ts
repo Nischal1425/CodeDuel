@@ -16,6 +16,7 @@ const GenerateCodingChallengeInputSchema = z.object({
   playerRank: z
     .number()
     .describe('The rank of the player, used to tailor the difficulty of the challenge.'),
+  targetDifficulty: z.enum(['easy', 'medium', 'hard']).describe('The target difficulty based on the selected lobby (e.g., easy, medium, hard).'),
 });
 export type GenerateCodingChallengeInput = z.infer<
   typeof GenerateCodingChallengeInputSchema
@@ -24,9 +25,10 @@ export type GenerateCodingChallengeInput = z.infer<
 const GenerateCodingChallengeOutputSchema = z.object({
   problemStatement: z
     .string()
-    .describe('The coding problem statement, including input and output specifications.'),
-  difficulty: z.enum(['easy', 'medium', 'hard']).describe('The difficulty level of the problem.'),
-  solution: z.string().describe('The reference solution code for the problem.'),
+    .describe('The coding problem statement, including input and output specifications, and clear examples.'),
+  difficulty: z.enum(['easy', 'medium', 'hard']).describe('The difficulty level of the problem, matching the targetDifficulty.'),
+  solution: z.string().describe('The reference solution code for the problem in JavaScript. This solution should be correct and efficient for the given problem and difficulty.'),
+  // Example: "function solve(params) { /* solution code */ return result; }"
 });
 export type GenerateCodingChallengeOutput = z.infer<
   typeof GenerateCodingChallengeOutputSchema
@@ -42,16 +44,21 @@ const prompt = ai.definePrompt({
   name: 'generateCodingChallengePrompt',
   input: {schema: GenerateCodingChallengeInputSchema},
   output: {schema: GenerateCodingChallengeOutputSchema},
-  prompt: `You are an expert coding challenge generator. You will generate a unique coding problem tailored to the player's skill level. The difficulty of the problem should align with the player's rank: a higher rank should correspond to a harder problem. The coding problem must be very challenging and well suited for a 1v1 coding battle.
+  prompt: `You are an expert coding challenge generator. You will generate a unique coding problem tailored to the player's skill level and the target difficulty.
+The difficulty of the problem must align with the player's rank and the specified target difficulty: a higher rank should correspond to a harder problem within the target difficulty tier.
+The coding problem must be very challenging and well suited for a 1v1 coding battle. The solution MUST be in JavaScript.
 
 Player Rank: {{{playerRank}}}
+Target Difficulty: {{{targetDifficulty}}}
 
 Generate a coding problem with the following specifications:
-- problemStatement: A clear and concise description of the coding problem, including input and output specifications.
-- difficulty: The difficulty level of the problem (easy, medium, or hard).
-- solution: A reference solution code for the problem.
+- problemStatement: A clear and concise description of the coding problem. Include detailed input and output specifications, constraints, and at least one clear example with input and expected output.
+- difficulty: The difficulty level of the problem (must be exactly 'easy', 'medium', or 'hard', matching the targetDifficulty).
+- solution: A reference solution code for the problem, written in JavaScript. The solution should be functionally correct and reasonably efficient for the stated difficulty.
 
-Ensure the problem includes obfuscation (logic twist, variable rename, disguised context) to make it AI-resistant.
+Ensure the problem includes obfuscation (logic twist, variable rename, disguised context) to make it AI-resistant but still solvable by a human.
+The problem statement should be comprehensive enough for a developer to understand and solve the problem without ambiguity.
+The solution should be a complete, runnable JavaScript function if applicable.
 
 Output the problem in a JSON format.
 `,
@@ -85,6 +92,13 @@ const generateCodingChallengeFlow = ai.defineFlow(
   },
   async input => {
     const {output} = await prompt(input);
+    // Ensure difficulty matches target, LLM might sometimes ignore strict enum if not reminded.
+    if (output && output.difficulty !== input.targetDifficulty) {
+        // Attempt to correct or log this discrepancy. For now, we'll let it pass
+        // but in a production system, you might re-prompt or handle this.
+        console.warn(`Generated difficulty ${output.difficulty} does not match target ${input.targetDifficulty}`);
+        // output.difficulty = input.targetDifficulty; // Force correction if needed
+    }
     return output!;
   }
 );
