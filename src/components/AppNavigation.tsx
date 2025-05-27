@@ -1,16 +1,18 @@
+
 "use client";
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation'; // Added useRouter
 import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion } from 'lucide-react';
 import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
 } from '@/components/ui/sidebar';
+import { useAuth } from '@/contexts/AuthContext'; // Added useAuth
 
 const navItems = [
-  { href: '/', label: 'Dashboard', icon: Home },
+  { href: '/dashboard', label: 'Dashboard', icon: Home }, // Updated href
   { href: '/arena', label: 'Arena', icon: Swords },
   { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { href: '/profile', label: 'Profile', icon: UserCircle },
@@ -20,6 +22,13 @@ const navItems = [
 
 export function AppNavigation() {
   const pathname = usePathname();
+  const { logout } = useAuth(); // Get logout function
+  const router = useRouter(); // Get router for redirection
+
+  const handleLogout = () => {
+    logout();
+    router.push('/'); // Redirect to the landing page
+  };
 
   return (
     <SidebarMenu>
@@ -27,7 +36,7 @@ export function AppNavigation() {
         <SidebarMenuItem key={item.href}>
           <Link href={item.href} passHref legacyBehavior>
             <SidebarMenuButton
-              isActive={pathname === item.href}
+              isActive={pathname === item.href || (item.href === '/dashboard' && pathname.startsWith('/(app)/dashboard'))} // Handle route group for dashboard active state
               tooltip={{ children: item.label, side: 'right', className: 'bg-popover text-popover-foreground' }}
               className="justify-start"
             >
@@ -37,12 +46,11 @@ export function AppNavigation() {
           </Link>
         </SidebarMenuItem>
       ))}
-      <SidebarMenuItem className="mt-auto"> {/* Pushes Log out to bottom */}
-         {/* Mock Log out button */}
+      <SidebarMenuItem className="mt-auto"> 
         <SidebarMenuButton
             tooltip={{ children: "Log Out", side: 'right', className: 'bg-popover text-popover-foreground' }}
             className="justify-start hover:bg-destructive/20 hover:text-destructive"
-            onClick={() => alert("Log out clicked (mock)")}
+            onClick={handleLogout} // Use the new logout handler
         >
             <LogOut className="h-5 w-5" />
             <span className="group-data-[collapsible=icon]:hidden">Log Out</span>
