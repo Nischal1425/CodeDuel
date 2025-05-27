@@ -182,9 +182,9 @@ export default function ArenaPage() {
       opponentSubmissionTimeoutRef.current = null;
     }
   };
-  
+
   const handleSubmissionFinalization = useCallback(async () => {
-    if (!player || !question || !currentLobbyDetailsRef.current || opponentCode === null) { 
+    if (!player || !question || !currentLobbyDetailsRef.current || opponentCode === null) {
       toast({ title: "Error", description: "Core game data missing for final comparison.", variant: "destructive" });
       setGameState('gameOver');
       setGameOverReason("error");
@@ -198,8 +198,8 @@ export default function ArenaPage() {
 
     try {
       const comparisonInput = {
-        player1Code: code || "", 
-        player2Code: opponentCode, 
+        player1Code: code || "",
+        player2Code: opponentCode,
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
         language: language,
@@ -221,16 +221,18 @@ export default function ArenaPage() {
         toast({ title: "Victory!", description: `You won the duel! ${winningsPaidOut} coins awarded.`, className: "bg-green-500 text-white", duration: 7000 });
       } else if (result.winner === 'player2') {
         setGameOverReason("comparison_player2_wins");
+        // Fee already deducted, no change to player coins on loss
         toast({ title: "Defeat", description: "Your opponent's solution was deemed superior.", variant: "destructive", duration: 7000 });
-      } else { 
+      } else {
         setGameOverReason("comparison_draw");
+        // Fee already deducted, no change to player coins on draw
         toast({ title: "Draw!", description: "The duel ended in a draw. Your entry fee was consumed.", variant: "default", duration: 7000 });
       }
     } catch (error) {
       console.error("Error during code comparison:", error);
       toast({ title: "Comparison Error", description: "Could not compare submissions. Mocking draw.", variant: "destructive" });
-      setComparisonResult(null); 
-      setGameOverReason("error"); 
+      setComparisonResult(null);
+      setGameOverReason("error");
     } finally {
       setIsComparing(false);
       setGameState('gameOver');
@@ -252,10 +254,10 @@ export default function ArenaPage() {
 
     try {
       const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
-      
-      if (gameStateRef.current !== 'searching') { 
+
+      if (gameStateRef.current !== 'searching') {
            console.log("Search cancelled during question fetch.");
-            if (player && lobbyInfo) { 
+            if (player && lobbyInfo) {
                 const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
                 setPlayer(refundedPlayer);
                 toast({ title: "Search Cancelled", description: `Entry fee of ${lobbyInfo.entryFee} coins refunded.`, variant: "default" });
@@ -265,12 +267,12 @@ export default function ArenaPage() {
       }
 
       setQuestion(challenge);
-      setCode(getCodePlaceholder(language, challenge)); // Set initial code with placeholder
-      setOpponentCode(challenge.solution); 
+      setCode(getCodePlaceholder(language, challenge));
+      setOpponentCode(challenge.solution);
       setTimeRemaining(lobbyInfo.baseTime * 60);
       setGameState('inGame');
 
-      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4); 
+      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4);
       opponentSubmissionTimeoutRef.current = setTimeout(() => {
         if (gameStateRef.current === 'inGame' && !opponentHasSubmittedCodeRef.current) {
           setOpponentHasSubmittedCode(true);
@@ -295,12 +297,12 @@ export default function ArenaPage() {
         duration: 7000,
       });
 
-      if (player && lobbyInfo) { 
+      if (player && lobbyInfo) {
         const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
         setPlayer(refundedPlayer);
         toast({ title: "Entry Fee Refunded", description: `Your ${lobbyInfo.entryFee} coins have been refunded.`, variant: "default" });
       }
-      resetGameState(true); 
+      resetGameState(true);
     } finally {
       setIsLoadingQuestion(false);
     }
@@ -341,27 +343,27 @@ export default function ArenaPage() {
     setSelectedLobbyName(lobbyName);
     setCurrentLobbyDetails(lobbyInfo);
     setGameState('searching');
-    setTestResults([]); 
+    setTestResults([]);
 
-    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); 
+    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2);
     const mockOpponentDetails: Player = {
       id: `bot_${Date.now()}`,
       username: `DuelBot${Math.floor(Math.random() * 1000)}`,
       coins: Math.floor(Math.random() * 5000) + 500,
       rank: opponentRank,
-      rating: opponentRank * 75 + Math.floor(Math.random() * 100), 
+      rating: opponentRank * 75 + Math.floor(Math.random() * 100),
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
 
     setTimeout(() => {
-      if (gameStateRef.current === 'searching') { 
+      if (gameStateRef.current === 'searching') {
         setMockOpponent(mockOpponentDetails);
         toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
         fetchQuestionForLobby(lobbyInfo);
       } else {
         console.log("Matchmaking timeout fired, but user already left 'searching' state.");
       }
-    }, 1500 + Math.random() * 1000); 
+    }, 1500 + Math.random() * 1000);
   };
 
 
@@ -380,7 +382,7 @@ export default function ArenaPage() {
     setPlayerHasSubmittedCode(true);
     toast({title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground"});
 
-    if (opponentHasSubmittedCodeRef.current) { 
+    if (opponentHasSubmittedCodeRef.current) {
       handleSubmissionFinalization();
     }
   };
@@ -399,15 +401,15 @@ export default function ArenaPage() {
       handleSubmissionFinalization();
     } else if (playerHasSubmittedCodeRef.current && !opponentHasSubmittedCodeRef.current) {
       setGameOverReason("timeup_player1_submitted_only");
-      setOpponentCode(""); 
-      handleSubmissionFinalization(); 
+      setOpponentCode("");
+      handleSubmissionFinalization();
     } else if (!playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
       setGameOverReason("timeup_player2_submitted_only");
-      setCode(''); 
-      handleSubmissionFinalization(); 
-    } else { 
+      setCode('');
+      handleSubmissionFinalization();
+    } else {
       setGameOverReason("timeup_neither_submitted");
-      setGameState('gameOver'); 
+      setGameState('gameOver');
     }
   };
 
@@ -417,17 +419,17 @@ export default function ArenaPage() {
     const lobbyFee = currentLobbyDetailsRef.current?.entryFee || 0;
 
     if (leaveConfirmType === 'search') {
-        if (player) { 
+        if (player) {
              toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${lobbyFee} coins was forfeited.`, variant: "default" });
         }
-        resetGameState(true); 
-        setGameOverReason("cancelledSearch"); 
+        resetGameState(true);
+        setGameOverReason("cancelledSearch");
     } else if (leaveConfirmType === 'game') {
-        if (player) { 
+        if (player) {
              toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${lobbyFee} coins was lost.`, variant: "destructive" });
         }
         setGameOverReason("forfeit_player1");
-        setGameState('gameOver'); 
+        setGameState('gameOver');
     }
     setLeaveConfirmType(null);
   };
@@ -437,184 +439,111 @@ export default function ArenaPage() {
     setShowLeaveConfirm(true);
   };
 
-  const parseFunctionSignature = (signature: string, lang: SupportedLanguage): { name: string, params: string[], signature: string } => {
-    if (lang === 'javascript' || lang === 'python') {
-      const funcRegex = /(?:function|def)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/;
-      const match = signature.match(funcRegex);
-      if (match) {
-        const name = match[1];
-        const paramsStr = match[2].trim();
-        const params = paramsStr ? paramsStr.split(',').map(p => p.trim().split('=')[0].trim()) : []; 
-        return { name, params, signature: match[0] };
-      }
-    } else if (lang === 'cpp') {
-      const cppFuncRegex = /([a-zA-Z0-9_<>:&*\s]+)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/; // Adjusted to include spaces in return type
-      const match = signature.match(cppFuncRegex);
-      if (match) {
-        const returnType = match[1].trim();
-        const name = match[2];
-        const paramsStr = match[3].trim();
-        const params = paramsStr ? paramsStr.split(',').map(p => {
-          const parts = p.trim().split(/\s+/);
-          return parts[parts.length -1].replace(/[&*]/g, ''); 
-        }) : [];
-        return { name, params, signature: `${returnType} ${name}(${match[3]})`};
-      }
+  const parseFunctionSignature = (signature: string, lang: SupportedLanguage): { name: string, params: string[], signature: string, returnType: string } => {
+    let name = 'solve'; // Default if parsing fails
+    let params: string[] = ['params']; // Default if parsing fails
+    let sig = signature; // Use original signature as fallback
+    let returnType = 'any'; // Default
+
+    try {
+        if (lang === 'javascript') {
+            const funcRegex = /function\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)\s*(?::\s*([^{]*))?/;
+            const match = signature.match(funcRegex);
+            if (match) {
+                name = match[1];
+                params = match[2].trim() ? match[2].split(',').map(p => p.trim().split('=')[0].trim()) : [];
+                sig = `function ${name}(${params.join(', ')})`; // Reconstruct for consistency
+                if (match[3]) returnType = match[3].trim();
+            } else {
+                 sig = `function ${name}(${params.join(', ')})`;
+            }
+        } else if (lang === 'python') {
+            const funcRegex = /def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)\s*(->\s*([a-zA-Z0-9_\[\], ]+))?:/;
+            const match = signature.match(funcRegex);
+            if (match) {
+                name = match[1];
+                params = match[2].trim() ? match[2].split(',').map(p => p.trim().split('=')[0].trim().split(':')[0].trim()) : [];
+                sig = `def ${name}(${match[2]}):`; // Keep original params string for placeholder
+                if(match[4]) returnType = match[4].trim(); else returnType = 'None';
+            } else {
+                 sig = `def ${name}(${params.join(', ')}):`;
+                 returnType = 'None';
+            }
+        } else if (lang === 'cpp') {
+            const cppFuncRegex = /([\w:<>,\s\*&]+?)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/;
+            const match = signature.match(cppFuncRegex);
+            if (match) {
+                returnType = match[1].trim();
+                name = match[2].trim();
+                const paramsStr = match[3].trim();
+                params = paramsStr ? paramsStr.split(',').map(p => {
+                    const parts = p.trim().split(/\s+/);
+                    return parts[parts.length -1].replace(/[&*]/g, '').trim();
+                }) : [];
+                sig = `${returnType} ${name}(${paramsStr})`;
+            } else {
+                sig = `void ${name}(/* parameters */)`; // Fallback with comment
+                returnType = 'void';
+            }
+        }
+    } catch (e) {
+        console.error("Error parsing function signature:", signature, e);
+        // Fallback to defaults if parsing fails
+        if (lang === 'javascript') sig = `function solve(params)`;
+        else if (lang === 'python') sig = `def solve(params):`;
+        else if (lang === 'cpp') sig = `void solve(/* params */)`;
+        name = 'solve';
+        params = ['params'];
+        returnType = lang === 'python' ? 'None' : (lang === 'cpp' ? 'void' : 'any');
     }
-    const fallbackName = lang === 'python' ? 'solve_challenge' : 'solveChallenge';
-    return { name: fallbackName, params: ['inputData'], signature: `${lang === 'python' ? 'def' : 'function'} ${fallbackName}(inputData)` };
+    return { name, params, signature: sig, returnType };
   };
 
 
   const getCodePlaceholder = (selectedLang: SupportedLanguage, currentQuestion: GenerateCodingChallengeOutput | null): string => {
-    const difficultyText = currentQuestion?.difficulty || 'N/A';
-    const lobbyNameText = currentLobbyDetailsRef.current?.name || 'N/A';
-    const problemHint = currentQuestion?.problemStatement ? currentQuestion.problemStatement.split('\n')[0].substring(0, 60) + "..." : "Challenge problem";
-    
-    let signatureInfo = { name: 'solve', params: ['params'] as string[], signature: selectedLang === 'python' ? 'def solve(params):' : 'function solve(params) { }' };
-    if (currentQuestion?.functionSignature) {
-        try {
-            signatureInfo = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
-        } catch (e) {
-            console.warn("Could not parse provided function signature, falling back.", e);
-        }
+    const defaultPlaceholders = {
+        javascript: `function solve(params) {\n  // Your code here\n  return;\n}`,
+        python: `def solve(params):\n  # Your code here\n  pass\n  return None`,
+        cpp: `#include <iostream>\n#include <vector>\n#include <string>\n// Add other necessary headers\n\nclass Solution {\npublic:\n    // Define your method here based on the problem statement\n    // e.g., int solve(int input) {\n    //     // Your code here\n    //     return 0;\n    // }\n};\n`
+    };
+
+    if (!currentQuestion?.functionSignature) {
+        return defaultPlaceholders[selectedLang];
     }
-    const { name: funcName, params: funcParams, signature: funcSignatureItself } = signatureInfo;
 
-    const paramDestructureJS = funcParams.length > 0 ? `const { ${funcParams.join(', ')} } = params;` : "// 'params' might be a single value or an array if the problem takes one input.";
-    const paramAccessCommentJS = `// Access parameters for '${funcName}' from the 'params' object.
-  // If 'params' is an object (e.g., { "nums": [1,2,3], "target": 9 }):
-  //   ${paramDestructureJS}
-  // If 'params' is a single value (e.g., 5 or "hello" or [1,2,3]):
-  //   Use 'params' directly as the argument for '${funcName}'.`;
+    const { name: funcName, params: funcParams, signature: funcSignatureItself, returnType } = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
 
-    const paramAccessCommentPy = `# Access parameters for '${funcName}' from the 'params' object or directly.
-  # If 'params' is a dictionary (e.g., { "nums": [1,2,3], "target": 9 }):
-  #   ${funcParams.map(p => `${p} = params.get("${p}")`).join('\n  #   ')}
-  # If 'params' is a single value (e.g., 5 or "hello" or [1,2,3]):
-  #   Use 'params' directly as the argument for '${funcName}'.`;
+    let body = `\n  // Your code here\n`;
+    let returnStatement = "";
 
-    const commonJsPythonHeader = `/**
- * The main 'solve(params)' function below will be called by the test runner.
- * Your actual problem-solving logic should be implemented in the '${funcName}' function.
- * 'solve(params)' will handle passing the 'params' to '${funcName}'.
- */`;
-    
-    const commonJsPythonFooter = (args: string) => `
-  // Call your problem-specific function with the correctly unpacked arguments
-  return ${funcName}(${args});
-}`;
-
-    switch (selectedLang) {
-      case 'javascript':
-        const jsArgs = funcParams.length > 1 ? funcParams.join(', ') : (funcParams.length === 1 && funcParams[0] !== 'params' ? funcParams[0] : 'params');
-        return `// Language: JavaScript
-// Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
-// Problem: ${problemHint}
-
-${commonJsPythonHeader}
-function solve(params) {
-  ${paramAccessCommentJS}
-
-  ${funcSignatureItself.replace(/\{[^}]*\}$/, '{')} // Keep signature, remove existing body
-    // YOUR CODE for ${funcName} HERE
-    // Example: console.log(${funcParams.join(', ') || 'params_for_funcName'});
-    let result;
-
-    return result;
-  }
-
-${commonJsPythonFooter(jsArgs)}
-}`;
-      case 'python':
-        const pyArgs = funcParams.length > 1 ? funcParams.join(', ') : (funcParams.length === 1 && funcParams[0] !== 'params' ? funcParams[0] : 'params');
-        return `# Language: Python
-# Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
-# Problem: ${problemHint}
-
-${commonJsPythonHeader.replace(/\/\*\*/g, '"""').replace(/\*\//g, '"""').replace(/\/\//g, '#')}
-def solve(params):
-  ${paramAccessCommentPy}
-
-  ${funcSignatureItself.replace(/\):[^)]*$/, '):')} # Keep signature, remove existing body
-    # YOUR CODE for ${funcName} HERE
-    # Example: print(${funcParams.join(', ') || 'params_for_funcName'})
-    result = None
-    
-    return result
-  
-${commonJsPythonFooter(pyArgs).replace(/\/\//g, '#')}
-`;
-      case 'cpp':
-        let cppBase = `// Language: C++
-// Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
-// Problem: ${problemHint}
-
-#include <iostream>
-#include <vector>
-#include <string>
-#include <sstream>
-// Add other common headers like <algorithm>, <map>, <set> if often needed by ${difficultyText} problems.
-
-// Client-side testing for C++ is not supported. Submit for full AI evaluation.
-`;
-        if (currentQuestion?.functionSignature && signatureInfo.name && signatureInfo.signature) {
-          cppBase += `
-class Solution {
-public:
-    ${signatureInfo.signature.replace(/\{[^}]*\}$/, '{')} // Use AI provided signature, ensure it's just the signature string
-        // YOUR CODE HERE for ${signatureInfo.name}
-        
-        // Example of returning a value (adjust type as per signature):
-        // std::vector<int> res;
-        // return res;
-    }
-};
-
-// Optional: main function for your own testing (this part won't be submitted for evaluation)
-/*
-int main() {
-    Solution sol;
-    // Example: Set up test inputs for '${signatureInfo.name}'
-    // std::vector<int> nums_example = {2, 7, 11, 15};
-    // int target_example = 9;
-    // std::vector<int> result = sol.${signatureInfo.name}(nums_example, target_example);
-    //
-    // for(int x : result) {
-    //     std::cout << x << " ";
-    // }
-    // std::cout << std::endl;
-    
-    return 0;
-}
-*/
-`;
+    if (selectedLang === 'javascript') {
+        if (returnType && returnType !== 'void' && returnType !== 'any' && !returnType.toLowerCase().includes('undefined')) {
+            returnStatement = `\n  return; // TODO: Expected return type: ${returnType}\n`;
         } else {
-          cppBase += `
-// Structure your C++ solution here.
-// The AI will evaluate the entire content of this text area.
-// If a specific function or class structure is implied by the problem, please use it.
-
-/*
-// Example of a standalone function:
-return_type function_name(parameters) {
-    // YOUR CODE HERE
-}
-
-int main() {
-    // Call your function or set up your test
-    return 0;
-}
-*/
-`;
+            returnStatement = `\n  return;\n`;
         }
-        return cppBase;
-      default:
-        return "// Select a language to see a placeholder. Your main solution function for JavaScript/Python should be named 'solve(params)'.";
+        return `${funcSignatureItself.replace(/\{\s*\}$/, '')} {${body}${returnStatement}}`;
+    } else if (selectedLang === 'python') {
+        body = `\n  # Your code here\n  pass\n`;
+        if (returnType && returnType !== 'None' && returnType) {
+            returnStatement = `  # TODO: Expected return type: ${returnType}\n`;
+        }
+        return `${funcSignatureItself.replace(/:$/, '')}:${body}${returnStatement}`;
+    } else if (selectedLang === 'cpp') {
+        let cppHeaders = `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n// Add other necessary headers based on the problem\n\n`;
+        if (returnType && returnType !== 'void') {
+             body += `\n  // TODO: Expected return type: ${returnType}\n  return {}; // Placeholder return, adjust as needed\n`;
+        } else {
+            body += `\n`;
+        }
+        // Ensure the signature doesn't already have a body
+        const signatureOnly = funcSignatureItself.replace(/\s*\{[^]*\}\s*$/, '');
+        return `${cppHeaders}class Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};`;
     }
+    return defaultPlaceholders[selectedLang];
   };
 
-  // Update code in textarea when language or question (with functionSignature) changes
+
   useEffect(() => {
     if (question) {
       setCode(getCodePlaceholder(language, question));
@@ -630,59 +559,80 @@ int main() {
     setIsTestingCode(true);
     const results: TestResult[] = [];
 
+    const signatureInfo = question.functionSignature ? parseFunctionSignature(question.functionSignature, language) : null;
+
+
     for (const tc of question.testCases) {
         let status: TestResult['status'] = 'not_run';
         let actualOutput = "N/A";
         let errorMessage: string | undefined;
 
-        if (language === 'javascript') {
+        if (language === 'javascript' && signatureInfo) {
             try {
-                const playerFunctionFactory = new Function(`
-                    "use strict";
-                    ${code}
-                    if (typeof solve !== 'function') {
-                        throw new Error('The "solve" function is not defined or not a function in your code. Please ensure your main logic is within a function named "solve(params)".');
-                    }
-                    return solve;
-                `);
-                const playerSolveFunction = playerFunctionFactory();
-                
-                let parsedInput: any = tc.input; 
+                let parsedInput: any = tc.input;
                 try {
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
                     } else if (tc.input.startsWith('"') && tc.input.endsWith('"')) {
-                         parsedInput = tc.input.slice(1, -1); 
-                    } else if (!isNaN(Number(tc.input)) && tc.input.trim() !== '') {
+                         parsedInput = tc.input.slice(1, -1);
+                    } else if (tc.input.trim() !== '' && !isNaN(Number(tc.input))) {
                          parsedInput = Number(tc.input);
                     }
                 } catch (e) {
-                    console.warn("Test case input was not valid JSON, passing as string: ", tc.input);
+                    console.warn("Test case input was not valid JSON or number, passing as string: ", tc.input);
                 }
-                
+
+                const paramsForPlayerFunc = signatureInfo.params.length === 1 && typeof parsedInput !== 'object' && parsedInput !== null
+                    ? [parsedInput]
+                    : signatureInfo.params.map(p => (parsedInput && typeof parsedInput === 'object') ? parsedInput[p] : undefined);
+
+
+                const scriptToRun = `
+                    "use strict";
+                    // Player's code:
+                    ${code}
+
+                    // Wrapper to call the player's function from solve(params)
+                    function solve(params) {
+                      const playerFuncArgs = ${JSON.stringify(signatureInfo.params)}.map(paramName => params && typeof params === 'object' ? params[paramName] : ( ${signatureInfo.params.length} === 1 ? params : undefined) );
+
+                      if (typeof ${signatureInfo.name} !== 'function') {
+                          throw new Error('The function "${signatureInfo.name}" is not defined or not a function in your code.');
+                      }
+                      return ${signatureInfo.name}(...playerFuncArgs);
+                    }
+
+                    // For direct testing if params is simple:
+                    // If test input 'tc.input' represents a single argument for player's function (not an object for solve(params))
+                    // We will pass 'parsedInput' to solve, which will then pass it to the player's function if it expects one arg.
+                    // If player's function expects multiple args, 'parsedInput' must be an object.
+                    return solve(${signatureInfo.params.length === 1 && typeof parsedInput !== 'object' ? JSON.stringify(parsedInput) : JSON.stringify(parsedInput)});
+                `;
+
                 let outputFromSolve;
                 try {
-                    outputFromSolve = playerSolveFunction(parsedInput);
+                    const playerFunctionFactory = new Function(scriptToRun);
+                    outputFromSolve = playerFunctionFactory();
                 } catch (solveError: any) {
-                    throw new Error(`Error during execution of your 'solve' function: ${solveError.message || String(solveError)}`);
+                    throw new Error(`Error during execution of your wrapped solution: ${solveError.message || String(solveError)}`);
                 }
-                
+
                 actualOutput = typeof outputFromSolve === 'object' && outputFromSolve !== null ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
 
                 let normalizedExpectedOutput = tc.expectedOutput;
-                 try { 
+                 try {
                     const parsedExpected = JSON.parse(tc.expectedOutput);
-                     // Attempt to re-stringify to normalize (e.g. key order, spacing)
-                    normalizedExpectedOutput = JSON.stringify(parsedExpected); 
+                    normalizedExpectedOutput = JSON.stringify(parsedExpected);
                 } catch (e) { /* not json, use as is for comparison */ }
 
 
                 status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
 
-            } catch (error: any) { 
+            } catch (error: any) {
                 status = 'error';
                 actualOutput = "Error during test execution";
-                errorMessage = error.message || String(error); 
+                errorMessage = error.message || String(error);
+                console.error("Test execution error details:", error);
             }
         } else {
             status = 'client_unsupported';
@@ -696,8 +646,8 @@ int main() {
             actualOutput,
             status,
             errorMessage,
-            timeTaken: "N/A", 
-            memoryUsed: "N/A", 
+            timeTaken: "N/A",
+            memoryUsed: "N/A",
         });
     }
     setTestResults(results);
@@ -709,10 +659,10 @@ int main() {
     if (!player && gameState !== 'selectingLobby') {
         resetGameState(true);
     }
-  }, [player, gameState]); 
+  }, [player, gameState]);
 
 
-  if (!player) { 
+  if (!player) {
      return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -792,23 +742,23 @@ int main() {
             message = `The duel ended in a draw. Your entry fee of ${entryFeePaid} coins was consumed.`;
             icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case "timeup_player1_submitted_only": 
+        case "timeup_player1_submitted_only":
             title = comparisonResult?.winner === 'player1' ? "Victory by Default!" : "Close Call!";
              const p1TimeoutWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
-            message = comparisonResult?.winner === 'player1' 
+            message = comparisonResult?.winner === 'player1'
                 ? `Your opponent timed out after you submitted! You won ${p1TimeoutWinnings} coins.`
-                : `Your opponent timed out. The match was considered a draw as your code was compared to an empty submission. You lost ${entryFeePaid} coins.`; 
+                : `Your opponent timed out. The match was considered a draw as your code was compared to an empty submission. You lost ${entryFeePaid} coins.`;
             icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case "timeup_player2_submitted_only": 
+        case "timeup_player2_submitted_only":
             title = "Defeat by Timeout";
             message = `You ran out of time after your opponent submitted. You lost ${entryFeePaid} coins.`;
             icon = <TimerIcon className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
-        case "timeup_both_submitted": 
+        case "timeup_both_submitted":
              title = comparisonResult?.winner === 'player1' ? "Last Second Victory!" : (comparisonResult?.winner === 'player2' ? "Defeat at the Buzzer!" : "Draw at Timeout!");
              const bothSubmittedWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
-             message = comparisonResult?.winner === 'player1' 
+             message = comparisonResult?.winner === 'player1'
                 ? `You won the duel right at the end! ${bothSubmittedWinnings} coins awarded.`
                 : (comparisonResult?.winner === 'player2' ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.` : `Duel ended in a draw at timeout. Your ${entryFeePaid} coins were consumed.`);
             icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : (comparisonResult?.winner === 'player2' ? <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />);
@@ -823,7 +773,7 @@ int main() {
             message = `You forfeited the match and lost ${entryFeePaid} coins.`;
             icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
             break;
-        case "cancelledSearch": 
+        case "cancelledSearch":
             title = "Search Cancelled";
             message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`;
             icon = <LogOut className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
@@ -923,7 +873,7 @@ int main() {
         </div>
        );
     }
-    if (!question || !mockOpponent || !currentLobbyDetailsRef.current) { 
+    if (!question || !mockOpponent || !currentLobbyDetailsRef.current) {
        return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
     }
 
@@ -953,15 +903,15 @@ int main() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0"> 
+        <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-              <CardHeader className="bg-card-foreground/5"> 
+              <CardHeader className="bg-card-foreground/5">
                   <div className="flex justify-between items-center">
                       <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
                       <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
                   </div>
               </CardHeader>
-              <CardContent className="p-0 flex-grow overflow-y-auto"> 
+              <CardContent className="p-0 flex-grow overflow-y-auto">
                   <ProblemDisplay question={question} />
               </CardContent>
             </Card>
@@ -1001,7 +951,7 @@ int main() {
                     <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>
                   )}
               </CardHeader>
-              <CardContent className="flex-grow p-4 flex flex-col min-h-0"> 
+              <CardContent className="flex-grow p-4 flex flex-col min-h-0">
                   <Textarea
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
@@ -1018,7 +968,7 @@ int main() {
                     <AccordionContent className="space-y-3 pt-2">
                         {question.testCases && question.testCases.length > 0 ? (
                             <>
-                                <div className="max-h-48 overflow-y-auto pr-2"> 
+                                <div className="max-h-48 overflow-y-auto pr-2">
                                     <Table>
                                         <TableHeader>
                                             <TableRow>
@@ -1048,7 +998,7 @@ int main() {
                                   </div>
                                 )}
                                 {testResults.length > 0 && (
-                                    <ScrollArea className="mt-2 max-h-48"> 
+                                    <ScrollArea className="mt-2 max-h-48">
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
@@ -1086,7 +1036,7 @@ int main() {
                     </AccordionContent>
                 </AccordionItem>
               </Accordion>
-              <div className="p-4 border-t flex flex-col gap-2"> 
+              <div className="p-4 border-t flex flex-col gap-2">
                   <Button
                     onClick={handleSubmitCode}
                     disabled={isComparing || playerHasSubmittedCode || !code.trim() || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'}
@@ -1145,6 +1095,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
 
     
