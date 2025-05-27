@@ -198,8 +198,8 @@ export default function ArenaPage() {
 
     try {
       const comparisonInput = {
-        player1Code: code || "", 
-        player2Code: opponentCode, 
+        player1Code: code || "",
+        player2Code: opponentCode,
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
         language: language,
@@ -220,6 +220,7 @@ export default function ArenaPage() {
         setGameOverReason("comparison_player1_wins");
         toast({ title: "Victory!", description: `You won the duel! ${winningsPaidOut} coins awarded.`, className: "bg-green-500 text-white", duration: 7000 });
       } else if (result.winner === 'player2') {
+        // Player already paid entry fee, no change to coins on loss
         setGameOverReason("comparison_player2_wins");
         toast({ title: "Defeat", description: "Your opponent's solution was deemed superior.", variant: "destructive", duration: 7000 });
       } else { // Draw
@@ -258,6 +259,7 @@ export default function ArenaPage() {
       if (gameStateRef.current !== 'searching') {
            console.log("Search cancelled during question fetch.");
             if (player && lobbyInfo) {
+              // No explicit refund here, as fee is only deducted on *successful* match start
             }
            resetGameState(true);
            return;
@@ -265,11 +267,11 @@ export default function ArenaPage() {
 
       setQuestion(challenge);
       setCode(getCodePlaceholder(language, challenge));
-      setOpponentCode(challenge.solution); 
+      setOpponentCode(challenge.solution);
       setTimeRemaining(lobbyInfo.baseTime * 60);
       setGameState('inGame');
 
-      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4); 
+      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4);
       opponentSubmissionTimeoutRef.current = setTimeout(() => {
         if (gameStateRef.current === 'inGame' && !opponentHasSubmittedCodeRef.current) {
           setOpponentHasSubmittedCode(true);
@@ -295,11 +297,13 @@ export default function ArenaPage() {
       });
 
       if (player && lobbyInfo) {
+        // Refund entry fee if it was deducted before challenge fetch failed
+        // Current logic deducts fee in handleSelectLobby which calls this, so refund is correct.
         const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
         setPlayer(refundedPlayer);
         toast({ title: "Entry Fee Refunded", description: `Your ${lobbyInfo.entryFee} coins have been refunded due to challenge error.`, variant: "default" });
       }
-      resetGameState(true); 
+      resetGameState(true);
     } finally {
       setIsLoadingQuestion(false);
     }
@@ -321,7 +325,7 @@ export default function ArenaPage() {
     if (player.coins < lobbyInfo.entryFee) {
         toast({
             title: "Insufficient Coins",
-            description: `You need ${lobbyInfo.entryFee} coins (you have ${player.coins}).`,
+            description: `You need ${lobbyInfo.entryFee} coins to enter this lobby (you have ${player.coins}).`,
             variant: "destructive",
             action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction>
         });
@@ -340,27 +344,31 @@ export default function ArenaPage() {
     setSelectedLobbyName(lobbyName);
     setCurrentLobbyDetails(lobbyInfo);
     setGameState('searching');
-    setTestResults([]); 
+    setTestResults([]);
 
-    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); 
+    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2);
     const mockOpponentDetails: Player = {
       id: `bot_${Date.now()}`,
       username: `DuelBot${Math.floor(Math.random() * 1000)}`,
-      coins: Math.floor(Math.random() * 5000) + 500, 
+      coins: Math.floor(Math.random() * 5000) + 500,
       rank: opponentRank,
-      rating: opponentRank * 75 + Math.floor(Math.random() * 100), 
+      rating: opponentRank * 75 + Math.floor(Math.random() * 100),
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
 
+    // Mock matchmaking delay
     setTimeout(() => {
-      if (gameStateRef.current === 'searching') { 
+      if (gameStateRef.current === 'searching') { // Ensure user hasn't cancelled
         setMockOpponent(mockOpponentDetails);
         toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
         fetchQuestionForLobby(lobbyInfo);
       } else {
+        // User cancelled search, entry fee was already deducted.
+        // If a refund policy for cancelling *before* match start is desired, it would go here
+        // For now, fee is kept by the "house" if search is cancelled.
         console.log("Matchmaking timeout fired, but user already left 'searching' state.");
       }
-    }, 1500 + Math.random() * 1000); 
+    }, 1500 + Math.random() * 1000); // 1.5-2.5 seconds mock search
   };
 
 
@@ -399,16 +407,17 @@ export default function ArenaPage() {
       setGameOverReason("timeup_both_submitted");
       handleSubmissionFinalization();
     } else if (playerHasSubmittedCodeRef.current && !opponentHasSubmittedCodeRef.current) {
-      setOpponentCode(""); 
+      setOpponentCode(""); // Opponent didn't submit, treat as empty for comparison
       setGameOverReason("timeup_player1_submitted_only");
       handleSubmissionFinalization();
     } else if (!playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
-      setCode(''); 
+      setCode(''); // Player didn't submit
       setGameOverReason("timeup_player2_submitted_only");
       handleSubmissionFinalization();
-    } else { 
+    } else { // Neither submitted
+      // Entry fees already deducted. Player loses fee.
       setGameOverReason("timeup_neither_submitted");
-      setGameState('gameOver'); 
+      setGameState('gameOver'); // Directly to game over, no comparison needed.
     }
   };
 
@@ -418,17 +427,21 @@ export default function ArenaPage() {
     const lobbyFee = currentLobbyDetailsRef.current?.entryFee || 0;
 
     if (leaveConfirmType === 'search') {
-        if (player) { 
+        if (player) {
+             // Fee already deducted, this toast confirms it's forfeited.
              toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${lobbyFee} coins was forfeited.`, variant: "default" });
         }
         resetGameState(true);
-        setGameOverReason("cancelledSearch"); 
+        setGameOverReason("cancelledSearch"); // Set a reason to potentially show on a summary if needed
+                                            // Or just reset without going to game over. For now, this is fine.
+        // No explicit gameState change to 'gameOver' here, just reset to lobby selection
     } else if (leaveConfirmType === 'game') {
         if (player) {
+             // Fee already deducted, this toast confirms it's forfeited.
              toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${lobbyFee} coins was lost.`, variant: "destructive" });
         }
         setGameOverReason("forfeit_player1");
-        setGameState('gameOver'); 
+        setGameState('gameOver'); // Transition to game over screen for forfeit
     }
     setLeaveConfirmType(null);
   };
@@ -442,7 +455,7 @@ export default function ArenaPage() {
     let name = 'solve';
     let params: string[] = ['params'];
     let sig = signature;
-    let returnType = 'any';
+    let returnType = 'any'; // Default
 
     try {
         if (lang === 'javascript') {
@@ -451,10 +464,10 @@ export default function ArenaPage() {
             if (match) {
                 name = match[1];
                 params = match[2].trim() ? match[2].split(',').map(p => p.trim().split('=')[0].trim()) : [];
-                sig = `function ${name}(${params.join(', ')})`; 
+                sig = `function ${name}(${params.join(', ')})`;
                 if (match[3]) returnType = match[3].trim();
             } else {
-                 sig = `function ${name}(${params.join(', ')})`;
+                 sig = `function ${name}(params)`; // Fallback if regex fails
             }
         } else if (lang === 'python') {
             const funcRegex = /def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)(?:\s*->\s*([a-zA-Z0-9_\[\], ]+))?:\s*$/;
@@ -462,10 +475,10 @@ export default function ArenaPage() {
             if (match) {
                 name = match[1];
                 params = match[2].trim() ? match[2].split(',').map(p => p.trim().split('=')[0].trim().split(':')[0].trim()) : [];
-                sig = `def ${name}(${match[2]})`; 
+                sig = `def ${name}(${match[2]})`; // Keep original params string for signature
                 if(match[3]) returnType = match[3].trim(); else returnType = 'None';
             } else {
-                 sig = `def ${name}(${params.join(', ')}):`; 
+                 sig = `def ${name}(params):`; // Fallback
                  returnType = 'None';
             }
         } else if (lang === 'cpp') {
@@ -476,12 +489,12 @@ export default function ArenaPage() {
                 name = match[2].trim();
                 const paramsStr = match[3].trim();
                 params = paramsStr ? paramsStr.split(',').map(p => {
-                    const parts = p.trim().split(/\s+/); 
-                    return parts[parts.length -1].replace(/[&*]/g, '').trim(); 
+                    const parts = p.trim().split(/\s+/);
+                    return parts[parts.length -1].replace(/[&*]/g, '').trim();
                 }) : [];
-                sig = `${returnType} ${name}(${paramsStr})`; 
+                sig = `${returnType} ${name}(${paramsStr})`;
             } else {
-                sig = `void ${name}(/* parameters */)`; 
+                sig = `void ${name}(/* parameters */)`;
                 returnType = 'void';
             }
         }
@@ -497,11 +510,12 @@ export default function ArenaPage() {
     return { name, params, signature: sig, returnType };
   };
 
+
   const getCodePlaceholder = (selectedLang: SupportedLanguage, currentQuestion: GenerateCodingChallengeOutput | null): string => {
     if (!currentQuestion?.functionSignature) {
       const defaults = {
         javascript: `function solve(params) {\n  // Your code here\n  return;\n}`,
-        python: `def solve(params):\n  # Your code here\n  return None`,
+        python: `def solve(params):\n  # Your code here\n  pass`,
         cpp: `#include <iostream>\n#include <vector>\n#include <string>\n\nclass Solution {\npublic:\n    // Define your method here, e.g. int solve(int input) { return 0; }\n};\n`
       };
       return defaults[selectedLang] || "// Select a language";
@@ -523,16 +537,16 @@ export default function ArenaPage() {
         body += `  // TODO: Implement logic. Print to cout if ostream, or ensure void function completes.\n`;
       }
 
-      return `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n#include <map>\n#include <set>\n// Add other necessary headers based on the problem\n\n// using namespace std; // Optional: uncomment if you prefer\n\nclass Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};\n\n// Optional main for local testing (will not be run by evaluator):\n/*\nint main() {\n    Solution sol;\n    // Example usage: e.g., std::cout << sol.${funcName}(...params...) << std::endl;\n    return 0;\n}\n*/`;
+      return `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n#include <map>\n#include <set>\n// Add other necessary headers based on the problem\n\n// using namespace std; // Optional: uncomment if you prefer\n\nclass Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};\n\n// Optional main for local testing (will not be run by evaluator):\n/*\nint main() {\n    Solution sol;\n    // Example usage for '${funcName}': \n    // e.g., auto result = sol.${funcName}(...params...);\n    // std::cout for printing results if applicable.\n    return 0;\n}\n*/`;
     }
-    return `// Placeholder for ${selectedLang} with ${funcName}`;
+    return `// Placeholder for ${selectedLang} - Problem signature: ${currentQuestion.functionSignature}`;
   };
 
 
   useEffect(() => {
-    if (question) {
+    if (question && language) {
       setCode(getCodePlaceholder(language, question));
-      setTestResults([]); 
+      setTestResults([]);
     }
   }, [language, question]);
 
@@ -553,102 +567,120 @@ export default function ArenaPage() {
         let actualOutput = "N/A";
         let errorMessage: string | undefined;
 
-        if (language === 'javascript' && signatureInfo) {
-            try { 
-                let parsedInput: any;
+        if (language === 'javascript') {
+            if (signatureInfo) {
                 try {
-                    if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
-                        parsedInput = JSON.parse(tc.input);
-                    } else if (tc.input.startsWith('"') && tc.input.endsWith('"') && tc.input.length >= 2) {
-                         parsedInput = JSON.parse(tc.input); 
-                    } else if (tc.input.trim() !== '' && !isNaN(Number(tc.input))) {
-                         parsedInput = Number(tc.input);
-                    } else {
-                        parsedInput = tc.input; 
+                    let parsedInput: any;
+                    try {
+                        // Attempt to parse input if it looks like JSON, otherwise use as is.
+                        if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
+                            parsedInput = JSON.parse(tc.input);
+                        } else if (tc.input.startsWith('"') && tc.input.endsWith('"') && tc.input.length >= 2) {
+                             parsedInput = JSON.parse(tc.input); // JSON string literal
+                        } else if (tc.input.trim() !== '' && !isNaN(Number(tc.input))) {
+                             parsedInput = Number(tc.input); // Number
+                        } else {
+                            parsedInput = tc.input; // Plain string or other primitive
+                        }
+                    } catch (e) {
+                        console.warn("Test case input was not valid JSON or number, attempting to pass as string: ", tc.input, e);
+                        parsedInput = tc.input; // Fallback to raw string if parsing fails
                     }
-                } catch (e) {
-                    console.warn("Test case input was not valid JSON or number, attempting to pass as string: ", tc.input, e);
-                    parsedInput = tc.input; 
-                }
-                
-                const playerCodeItself = code;
-                const functionNameToCall = signatureInfo.name;
-                const functionParamsExpected = signatureInfo.params;
+                    
+                    const playerCodeItself = code;
+                    const functionNameToCall = signatureInfo.name;
+                    const functionParamsExpected = signatureInfo.params; // Names of parameters
 
-                let scriptToRun = `
-                    "use strict";
-                    // Player's submitted code (which defines '${functionNameToCall}'):
-                    ${playerCodeItself}
+                    // Dynamically construct the solve_wrapper and call it
+                    // This wrapper calls the player's actual function (e.g., twoSum)
+                    // with arguments derived from 'params_wrapper_arg' based on the function signature.
+                    let scriptToRun = `
+                        "use strict";
+                        // Player's submitted code (which defines '${functionNameToCall}'):
+                        ${playerCodeItself}
 
-                    // Wrapper to call the player's specific function from a generic solve(params_wrapper)
-                    function solve_wrapper_for_test_runner(params_wrapper_arg) {
-                      if (typeof ${functionNameToCall} !== 'function') {
-                        throw new Error('The function "${functionNameToCall}" (expected from problem signature "${signatureInfo.signature}") is not found or not a function in your code. Please ensure it is defined correctly.');
-                      }
-                      
-                      let argsForPlayerFunc;
-                      if (${functionParamsExpected.length} === 0) {
-                          argsForPlayerFunc = [];
-                      } 
-                      else if (${functionParamsExpected.length} === 1 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null || Array.isArray(params_wrapper_arg) || Object.keys(params_wrapper_arg).length !== functionParamsExpected.length )) {
-                          argsForPlayerFunc = [params_wrapper_arg];
-                      } 
-                      else if (typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null && ${functionParamsExpected.length} > 0) {
-                          argsForPlayerFunc = ${JSON.stringify(functionParamsExpected)}.map(paramName => {
-                            if (params_wrapper_arg.hasOwnProperty(paramName)) {
-                                return params_wrapper_arg[paramName];
-                            }
-                            console.warn("Parameter '"+paramName+"' not found in test case input params object:", params_wrapper_arg, "Expected params:", ${JSON.stringify(functionParamsExpected)});
-                            return undefined; 
-                          });
-                      } 
-                      else if (${functionParamsExpected.length} > 0 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null)) {
-                           console.error("Mismatch: Expected multiple parameters for ${functionNameToCall}, but test case input 'params_wrapper_arg' is not an object. Input:", params_wrapper_arg);
-                           throw new Error("Test case input structure does not match expected parameters for ${functionNameToCall}. Expected an object mapping parameter names to values, but received " + (typeof params_wrapper_arg));
-                      }
-                      else { 
-                          argsForPlayerFunc = [params_wrapper_arg];
-                      }
-                      return ${functionNameToCall}(...argsForPlayerFunc);
+                        // Wrapper to call the player's specific function from a generic solve(params_wrapper)
+                        function solve_wrapper_for_test_runner(params_wrapper_arg) {
+                          if (typeof ${functionNameToCall} !== 'function') {
+                            throw new Error('The function "${functionNameToCall}" (expected from problem signature "${signatureInfo.signature}") is not found or not a function in your code. Please ensure it is defined correctly.');
+                          }
+                          
+                          let argsForPlayerFunc;
+                          if (${functionParamsExpected.length} === 0) {
+                              argsForPlayerFunc = [];
+                          } 
+                          // Single param expected by signature, and input is NOT an object (or is an array, which is an object type but usually treated as a single param)
+                          else if (${functionParamsExpected.length} === 1 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null || Array.isArray(params_wrapper_arg))) {
+                              argsForPlayerFunc = [params_wrapper_arg];
+                          } 
+                          // Multiple params expected by signature, and input is an object (mapping param names to values)
+                          // Check if all expected param names are present in the input object
+                          else if (typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null && ${functionParamsExpected.length} > 0 && ${JSON.stringify(functionParamsExpected)}.every(p => params_wrapper_arg.hasOwnProperty(p)) ) {
+                              argsForPlayerFunc = ${JSON.stringify(functionParamsExpected)}.map(paramName => params_wrapper_arg[paramName]);
+                          }
+                          // Single param expected by signature, and input IS an object. Pass it as is.
+                          else if (${functionParamsExpected.length} === 1 && typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null) {
+                                argsForPlayerFunc = [params_wrapper_arg];
+                          }
+                          // Fallback or mismatch:
+                          // This case covers situations where the input structure doesn't neatly map to expected params,
+                          // e.g. multiple params expected but input is not an object, or object keys don't match.
+                          else {
+                               console.warn("Input structure for test case doesn't perfectly match function signature's expected parameters. Passing input as a single argument. Input:", params_wrapper_arg, "Expected params by signature:", ${JSON.stringify(functionParamsExpected)});
+                               argsForPlayerFunc = [params_wrapper_arg]; // Pass the whole input as the first (or only) arg
+                          }
+                          return ${functionNameToCall}(...argsForPlayerFunc);
+                        }
+                        // Call the wrapper with the parsed test case input
+                        return solve_wrapper_for_test_runner(${typeof parsedInput === 'string' ? JSON.stringify(parsedInput) : JSON.stringify(parsedInput)});
+                    `;
+                    
+                    let outputFromSolve;
+                    try { 
+                      // This is where the player's code (wrapped) gets executed
+                      const playerFunctionFactory = new Function(scriptToRun);
+                      outputFromSolve = playerFunctionFactory();
+                    } catch (solveError: any) {
+                        // Error occurred INSIDE the player's code or the wrapper
+                        status = 'error';
+                        actualOutput = "Execution Error";
+                        errorMessage = solveError.message || String(solveError);
+                        console.error("Test execution error in player's code or wrapper:", solveError, "Input:", tc.input, "Script attempted:", scriptToRun);
+                        results.push({
+                            testCaseName: tc.name, input: tc.input, expectedOutput: tc.expectedOutput, actualOutput, status, errorMessage,
+                            timeTaken: "N/A", memoryUsed: "N/A",
+                        });
+                        continue; // Important: Move to the next test case
                     }
-                    return solve_wrapper_for_test_runner(${JSON.stringify(parsedInput)});
-                `;
-                
-                let outputFromSolve;
-                try { 
-                  const playerFunctionFactory = new Function(scriptToRun);
-                  outputFromSolve = playerFunctionFactory();
-                } catch (solveError: any) {
+
+                    // Normalize actual output for comparison
+                    actualOutput = outputFromSolve === undefined ? "undefined" : (outputFromSolve === null ? "null" : (typeof outputFromSolve === 'object' ? JSON.stringify(outputFromSolve) : String(outputFromSolve)));
+                    
+                    // Normalize expected output for comparison if it's a stringified object/array
+                    let normalizedExpectedOutput = tc.expectedOutput;
+                    try { 
+                        const parsedExpected = JSON.parse(tc.expectedOutput);
+                        normalizedExpectedOutput = JSON.stringify(parsedExpected); // Stringify to ensure consistent comparison
+                    } catch (e) { /* not json, use as is */ }
+
+                    status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
+
+                } catch (setupError: any) { 
+                    // Error in the test running setup itself (outside player code execution)
                     status = 'error';
-                    actualOutput = "Execution Error";
-                    errorMessage = solveError.message || String(solveError);
-                    console.error("Test execution error in player's code:", solveError, "Input:", tc.input);
-                    results.push({
-                        testCaseName: tc.name, input: tc.input, expectedOutput: tc.expectedOutput, actualOutput, status, errorMessage,
-                        timeTaken: "N/A", memoryUsed: "N/A",
-                    });
-                    continue; // Skip to next test case if this one errors
+                    actualOutput = "Error during test setup";
+                    errorMessage = `Test setup error: ${setupError.message || String(setupError)}`;
+                    console.error("Test setup error details:", setupError, "Input:", tc.input);
                 }
-
-                actualOutput = outputFromSolve === undefined ? "undefined" : (typeof outputFromSolve === 'object' && outputFromSolve !== null ? JSON.stringify(outputFromSolve) : String(outputFromSolve));
-                
-                let normalizedExpectedOutput = tc.expectedOutput;
-                try { 
-                    const parsedExpected = JSON.parse(tc.expectedOutput);
-                    normalizedExpectedOutput = JSON.stringify(parsedExpected); // Stringify to ensure consistent comparison
-                } catch (e) { /* not json, use as is */ }
-
-                status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
-
-            } catch (setupError: any) { 
+            } else { // JavaScript, but signatureInfo is null (AI didn't provide signature or it's invalid)
                 status = 'error';
-                actualOutput = "Error during test setup";
-                errorMessage = `Test setup error: ${setupError.message || String(setupError)}`;
-                console.error("Test setup error details:", setupError, "Input:", tc.input);
+                actualOutput = 'N/A';
+                errorMessage = 'Cannot run JavaScript tests: Missing or invalid function signature in problem definition.';
             }
-        } else { 
+        } else { // Not JavaScript (Python or C++)
             status = 'client_unsupported';
-            actualOutput = "N/A"; 
+            actualOutput = "N/A";
+            // Informational banner is shown in UI, no need for specific error message here
         }
 
         results.push({
@@ -657,9 +689,9 @@ export default function ArenaPage() {
             expectedOutput: tc.expectedOutput,
             actualOutput,
             status,
-            errorMessage,
-            timeTaken: "N/A", 
-            memoryUsed: "N/A", 
+            errorMessage, // This will be undefined for client_unsupported
+            timeTaken: "N/A", // Mocked
+            memoryUsed: "N/A", // Mocked
         });
     }
     setTestResults(results);
@@ -761,7 +793,7 @@ export default function ArenaPage() {
                 ? `Your opponent timed out after you submitted! You won ${p1TimeoutWinnings} coins.`
                 : (comparisonResult?.winner === 'draw'
                     ? `Your opponent timed out. The match was considered a draw. Your entry fee of ${entryFeePaid} coins has been refunded.`
-                    : `Your opponent timed out. Your solution was compared. You lost ${entryFeePaid} coins.`);
+                    : `Your opponent timed out. Your solution was compared. You lost ${entryFeePaid} coins.`); // Loss case
             icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
         case "timeup_player2_submitted_only":
@@ -774,8 +806,8 @@ export default function ArenaPage() {
              const bothSubmittedWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
              message = comparisonResult?.winner === 'player1'
                 ? `You won the duel right at the end! ${bothSubmittedWinnings} coins awarded.`
-                : (comparisonResult?.winner === 'player2' 
-                    ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.` 
+                : (comparisonResult?.winner === 'player2'
+                    ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.`
                     : `Duel ended in a draw at timeout. Your entry fee of ${entryFeePaid} coins has been refunded.`);
             icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : (comparisonResult?.winner === 'player2' ? <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />);
             break;
@@ -791,7 +823,7 @@ export default function ArenaPage() {
             break;
         case "cancelledSearch":
             title = "Search Cancelled";
-            message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`;
+            message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`; // This message is more for internal state; actual toast handles user-facing.
             icon = <LogOut className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
             break;
         case "error":
@@ -801,7 +833,7 @@ export default function ArenaPage() {
             icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
     }
-    
+
     let winningCodeDisplay: { name: string | null; code: string | null } = { name: null, code: null };
     if (comparisonResult && (comparisonResult.winner === 'player1' || comparisonResult.winner === 'player2')) {
         if (comparisonResult.winner === 'player1' && player) {
@@ -1137,6 +1169,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-    
 
     
