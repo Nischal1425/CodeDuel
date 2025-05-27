@@ -25,7 +25,7 @@ export type GenerateCodingChallengeInput = z.infer<
 
 const TestCaseSchema = z.object({
   name: z.string().describe("A descriptive name for the test case (e.g., 'Test Case 1: Basic Input', 'Test Case 2: Edge Case with Empty Array')."),
-  input: z.string().describe("The input for the test case. If the input is complex (e.g., object, array), represent it as a JSON string. Otherwise, a simple string for primitive types. The player's 'solve(params)' function will likely receive JSON.parse(input) if it's JSON, or the raw string if it's a primitive."),
+  input: z.string().describe("The input for the test case. If the input is complex (e.g., object, array with multiple conceptual parameters), represent it as a JSON string where keys are conceptual parameter names. Otherwise, a simple string for primitive types. The player's 'solve(params)' function will receive JSON.parse(input) if it's JSON, or the raw string if it's a primitive."),
   expectedOutput: z.string().describe("The expected output for the test case. If the output is complex, represent it as a JSON string. Otherwise, a simple string."),
   isPublic: z.boolean().default(true).describe("Whether this test case is visible to the player before submission. Defaults to true."),
 });
@@ -34,10 +34,11 @@ export type TestCase = z.infer<typeof TestCaseSchema>;
 const GenerateCodingChallengeOutputSchema = z.object({
   problemStatement: z
     .string()
-    .describe('The coding problem statement, including input and output specifications, constraints, and clear examples. This statement should be language-agnostic enough to be solvable in JavaScript, Python, or C++.'),
+    .describe('The coding problem statement, including input and output specifications, constraints, and clear examples. This statement should be language-agnostic enough to be solvable in JavaScript, Python, or C++. It should clearly define the conceptual input parameters and their types.'),
   difficulty: z.enum(['easy', 'medium', 'hard']).describe('The difficulty level of the problem, matching the targetDifficulty.'),
-  solution: z.string().describe('The reference solution code for the problem, primarily in JavaScript. This solution should be correct and efficient for the given problem and difficulty. The primary JavaScript solution function MUST be named `solve` and accept a single argument `params`.'),
-  testCases: z.array(TestCaseSchema).min(2).max(4).describe("An array of 2 to 4 public test cases. Each test case should include a name, string input (JSON string for complex inputs, or primitive string for simple inputs), string expectedOutput (JSON string for complex outputs, or primitive string for simple outputs), and isPublic flag."),
+  solution: z.string().describe('The reference solution code for the problem, primarily in JavaScript. This solution function MUST be named `solve` and accept a single argument `params`. If the problem has multiple conceptual inputs (e.g. `nums`, `target`), `params` will be an object like `{ "nums": ..., "target": ...}`. If it has a single primitive input, `params` will be that primitive.'),
+  testCases: z.array(TestCaseSchema).min(2).max(4).describe("An array of 2 to 4 public test cases. Each test case should include a name, string input (JSON string for complex inputs with named parameters, or primitive string for simple inputs), string expectedOutput (JSON string for complex outputs, or primitive string for simple outputs), and isPublic flag."),
+  functionSignature: z.string().optional().describe("A string representing the primary function signature the player should ideally implement, e.g., 'function twoSum(nums, target)' or 'def get_average(scores):'. This helps in setting up the code editor placeholder. This signature should align with the conceptual inputs described in problemStatement and used in testCases."),
 });
 export type GenerateCodingChallengeOutput = z.infer<
   typeof GenerateCodingChallengeOutputSchema
@@ -59,25 +60,30 @@ The difficulty of the problem must align with the player's rank and the specifie
 The coding problem must be very challenging and well suited for a 1v1 coding battle.
 The reference solution MUST be in JavaScript. The problem statement itself should be language-agnostic, suitable for solving in JavaScript, Python, or C++.
 **The problem should be inspired by real-world scenarios, case studies, or challenges one might encounter in innovative tech environments, similar to those at leading technology companies. Focus on practical application and creative problem-solving.**
-If you mention a function signature in the problem statement, it should align with a generic 'solve(params)' convention (or its equivalent in other languages, where 'params' represents the input). The input 'params' will correspond to the test case 'input' field.
 
 Player Rank: {{{playerRank}}}
 Target Difficulty: {{{targetDifficulty}}}
 Preferred Solution Language (for reference solution): JavaScript
 
 Generate a coding problem with the following specifications:
-- problemStatement: A clear and concise description of the coding problem. Include detailed input and output specifications, constraints, and at least one clear example with input and expected output. Ensure the problem statement is understandable and solvable by someone using JavaScript, Python, or C++.
+- problemStatement: A clear and concise description of the coding problem. Include detailed input and output specifications (clearly defining conceptual input parameters and their types), constraints, and at least one clear example with input and expected output. Ensure the problem statement is understandable and solvable by someone using JavaScript, Python, or C++.
 - difficulty: The difficulty level of the problem (must be exactly 'easy', 'medium', or 'hard', matching the targetDifficulty).
-- solution: A reference solution code for the problem, written in JavaScript. The solution should be functionally correct and reasonably efficient for the stated difficulty. The primary JavaScript solution function *must* be named 'solve' and accept a single argument 'params' (e.g., "function solve(params) { /* solution code */ return result; }"). This 'solve' function must correctly handle 'params' whether it's a primitive type directly from the test case input string, or an object/array parsed from a JSON test case input string.
+- solution: A reference solution code for the problem, written in JavaScript. The primary JavaScript solution function *must* be named 'solve' and accept a single argument 'params'.
+    - If the problem involves multiple conceptual inputs (e.g., an array \`nums\` and an integer \`target\`), the \`params\` argument for the \`solve\` function will be an object like \`{ "nums": [1,2,3], "target": 5 }\`. The \`solve\` function must then extract these (e.g., \`const nums = params.nums;\`).
+    - If the problem involves a single primitive input (e.g., a number \`n\`), the \`params\` argument will be that primitive value directly (e.g., \`params = 5\`).
+    The reference \`solve\` function must correctly handle \`params\` based on this structure.
 - testCases: Generate 2-3 public test cases (isPublic: true).
     - Each testCase needs a 'name'.
-    - 'input': Input for the test case. If complex (object/array), provide as a JSON STRING. If simple (number/string), provide as a plain string. Example: for input like \`{ "arr": [1,2,3], "k": 2 }\`, the string should be \`'{"arr": [1,2,3], "k": 2}'\`. For input \`5\`, the string should be \`'5'\`. For input \`"hello"\`, the string should be \`'"hello"'\`.
+    - 'input': Input for the test case.
+        - If the problem has multiple conceptual parameters (e.g., \`nums\` and \`target\`), this MUST be a JSON STRING representing an object mapping these parameter names to their values. Example: For inputs \`nums = [1,2,3]\` and \`k = 2\`, the input string should be \`'{"nums": [1,2,3], "k": 2}'\`.
+        - If the problem has a single primitive input (e.g., \`5\` or \`"hello"\`), this should be a plain string representation of that primitive. Example: for input \`5\`, the string should be \`'5'\`. For input \`"hello"\`, the string should be \`'"hello"'\` (including the quotes if it's a string literal).
     - 'expectedOutput': Expected output. If complex, provide as a JSON STRING. If simple, provide as a plain string. Example: for output \`[3,4]\`, the string should be \`'[3,4]'\`. For output \`10\`, the string should be \`'10'\`.
     - 'isPublic': Must be true.
+- functionSignature: (Optional but highly recommended) A string representing the primary function signature the player should ideally implement for the problem. For example, if the problem is "Two Sum", this could be 'function twoSum(nums, target)'. This signature should align with the conceptual inputs defined in the problem statement and the structure of the 'input' field in testCases. The name and parameters should be descriptive.
 
 Ensure the problem includes obfuscation (logic twist, variable rename, disguised context) to make it AI-resistant but still solvable by a human.
 The problem statement should be comprehensive enough for a developer to understand and solve the problem without ambiguity.
-The JavaScript reference solution should be a complete, runnable function.
+The JavaScript reference solution (\`solve\` function) should be complete and runnable.
 
 Output the problem in the specified JSON format.
 `,
@@ -131,6 +137,3 @@ const generateCodingChallengeFlow = ai.defineFlow(
     return output!;
   }
 );
-
-
-    

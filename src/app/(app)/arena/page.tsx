@@ -175,8 +175,6 @@ export default function ArenaPage() {
     setComparisonResult(null);
     setTimeRemaining(0);
     setErrorLoadingQuestion(null);
-    // Don't reset gameOverReason here if we want to display it on a screen that uses this function to "play again"
-    // setGameOverReason("error"); 
     setShowLeaveConfirm(false);
     setLeaveConfirmType(null);
     if (opponentSubmissionTimeoutRef.current) {
@@ -186,7 +184,7 @@ export default function ArenaPage() {
   };
   
   const handleSubmissionFinalization = useCallback(async () => {
-    if (!player || !question || !currentLobbyDetailsRef.current || opponentCode === null) { // Check opponentCode for null explicitly
+    if (!player || !question || !currentLobbyDetailsRef.current || opponentCode === null) { 
       toast({ title: "Error", description: "Core game data missing for final comparison.", variant: "destructive" });
       setGameState('gameOver');
       setGameOverReason("error");
@@ -201,7 +199,7 @@ export default function ArenaPage() {
     try {
       const comparisonInput = {
         player1Code: code || "", 
-        player2Code: opponentCode, // opponentCode can be "" if they didn't submit
+        player2Code: opponentCode, 
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
         language: language,
@@ -224,11 +222,9 @@ export default function ArenaPage() {
       } else if (result.winner === 'player2') {
         setGameOverReason("comparison_player2_wins");
         toast({ title: "Defeat", description: "Your opponent's solution was deemed superior.", variant: "destructive", duration: 7000 });
-        // Player already lost entry fee
-      } else { // Draw
+      } else { 
         setGameOverReason("comparison_draw");
         toast({ title: "Draw!", description: "The duel ended in a draw. Your entry fee was consumed.", variant: "default", duration: 7000 });
-        // Player already lost entry fee
       }
     } catch (error) {
       console.error("Error during code comparison:", error);
@@ -269,6 +265,7 @@ export default function ArenaPage() {
       }
 
       setQuestion(challenge);
+      setCode(getCodePlaceholder(language, challenge)); // Set initial code with placeholder
       setOpponentCode(challenge.solution); 
       setTimeRemaining(lobbyInfo.baseTime * 60);
       setGameState('inGame');
@@ -307,7 +304,7 @@ export default function ArenaPage() {
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [player, toast, setPlayer, handleSubmissionFinalization]);
+  }, [player, toast, setPlayer, handleSubmissionFinalization, language]);
 
 
   const handleSelectLobby = (lobbyName: DifficultyLobby) => {
@@ -344,7 +341,7 @@ export default function ArenaPage() {
     setSelectedLobbyName(lobbyName);
     setCurrentLobbyDetails(lobbyInfo);
     setGameState('searching');
-    setTestResults([]); // Clear test results from previous game
+    setTestResults([]); 
 
     const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); 
     const mockOpponentDetails: Player = {
@@ -356,7 +353,6 @@ export default function ArenaPage() {
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
 
-    // Mock matchmaking delay
     setTimeout(() => {
       if (gameStateRef.current === 'searching') { 
         setMockOpponent(mockOpponentDetails);
@@ -384,7 +380,7 @@ export default function ArenaPage() {
     setPlayerHasSubmittedCode(true);
     toast({title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground"});
 
-    if (opponentHasSubmittedCodeRef.current) { // Use ref for immediate state
+    if (opponentHasSubmittedCodeRef.current) { 
       handleSubmissionFinalization();
     }
   };
@@ -409,7 +405,7 @@ export default function ArenaPage() {
       setGameOverReason("timeup_player2_submitted_only");
       setCode(''); 
       handleSubmissionFinalization(); 
-    } else { // Neither submitted
+    } else { 
       setGameOverReason("timeup_neither_submitted");
       setGameState('gameOver'); 
     }
@@ -441,12 +437,64 @@ export default function ArenaPage() {
     setShowLeaveConfirm(true);
   };
 
-  const getCodePlaceholder = (selectedLang: SupportedLanguage): string => {
-    const difficultyText = question?.difficulty || 'N/A';
+  const parseFunctionSignature = (signature: string, lang: SupportedLanguage): { name: string, params: string[], signature: string } => {
+    if (lang === 'javascript' || lang === 'python') {
+      const funcRegex = /(?:function|def)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/;
+      const match = signature.match(funcRegex);
+      if (match) {
+        const name = match[1];
+        const paramsStr = match[2].trim();
+        const params = paramsStr ? paramsStr.split(',').map(p => p.trim().split('=')[0].trim()) : []; // Handle default values
+        return { name, params, signature: match[0] };
+      }
+    } else if (lang === 'cpp') {
+      // Basic C++ parsing, might not cover all cases.
+      // Example: "int solve(vector<int> nums, int target)"
+      const cppFuncRegex = /([a-zA-Z0-9_<>:&*]+)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/;
+      const match = signature.match(cppFuncRegex);
+      if (match) {
+        const name = match[2];
+        const paramsStr = match[3].trim();
+        const params = paramsStr ? paramsStr.split(',').map(p => {
+          const parts = p.trim().split(/\s+/);
+          return parts[parts.length -1].replace(/[&*]/g, ''); // Get last part (name), remove ptr/ref symbols
+        }) : [];
+        return { name, params, signature: `${match[1]} ${name}(${match[3]})`};
+      }
+    }
+    // Fallback if parsing fails
+    const fallbackName = lang === 'python' ? 'solve_challenge' : 'solveChallenge';
+    return { name: fallbackName, params: ['inputData'], signature: `${lang === 'python' ? 'def' : 'function'} ${fallbackName}(inputData)` };
+  };
+
+
+  const getCodePlaceholder = (selectedLang: SupportedLanguage, currentQuestion: GenerateCodingChallengeOutput | null): string => {
+    const difficultyText = currentQuestion?.difficulty || 'N/A';
     const lobbyNameText = currentLobbyDetailsRef.current?.name || 'N/A';
+    const problemHint = currentQuestion?.problemStatement ? currentQuestion.problemStatement.split('\n')[0].substring(0, 60) + "..." : "Challenge problem";
     
-    // Extract problem title or a short summary if possible, otherwise use a generic placeholder
-    const problemHint = question?.problemStatement ? question.problemStatement.split('\n')[0].substring(0, 60) + "..." : "Challenge problem";
+    let signatureInfo = { name: 'solve', params: ['params'], signature: selectedLang === 'python' ? 'def solve(params):' : 'function solve(params)' };
+    if (currentQuestion?.functionSignature) {
+        try {
+            signatureInfo = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
+        } catch (e) {
+            console.warn("Could not parse provided function signature, falling back.", e);
+        }
+    }
+    const { name: funcName, params: funcParams, signature: funcSignatureItself } = signatureInfo;
+
+    const paramComments = funcParams.map(p => `  // const ${p} = params.${p};`).join('\n');
+    const paramDestructure = funcParams.length > 0 ? `const { ${funcParams.join(', ')} } = params;` : "// 'params' might be a single value if the problem takes one primitive input.";
+
+
+    const commonJsPythonHeader = `/**
+ * Your solution will be tested by calling the MAIN 'solve(params)' function.
+ * The 'params' object will contain the inputs as described by the problem.
+ * Example: If problem inputs are 'nums' and 'target', 
+ * 'params' could be: { "nums": [2, 7, 11, 15], "target": 9 }
+ * or if it's a single array input: params = [1, 2, 3]
+ * or a single number input: params = 5
+ */`;
 
     switch (selectedLang) {
       case 'javascript':
@@ -454,104 +502,113 @@ export default function ArenaPage() {
 // Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
 // Problem: ${problemHint}
 
-/**
- * IMPORTANT: Your solution MUST be within a function named 'solve'.
- * This function will receive a single argument 'params'.
- * 
- * If the test case input is a simple value (e.g., a number 5, a string "hello"),
- * 'params' will be that value directly (e.g., params = 5).
- * 
- * If the test case input is a complex structure (e.g., an object like {"arr": [1,2,3], "k": 2} or an array [1,2,3]),
- * 'params' will be the JavaScript object/array parsed from the JSON string input.
- * You can then destructure or access properties from 'params' as needed.
- * Example for object input: const { arr, k } = params;
- * Example for array input: const firstElement = params[0];
- */
+${commonJsPythonHeader}
 function solve(params) {
-  // Your brilliant JavaScript code here!
-  // Remember to return the result as per the problem's output specification.
-  // Example:
-  // if (typeof params === 'number') {
-  //   return params * 2; // If input is a number
-  // } else if (Array.isArray(params)) {
-  //   return params.length; // If input is an array
-  // } else if (typeof params === 'object' && params !== null) {
-  //   // const { someProperty } = params;
-  //   // return someProperty; // If input is an object
-  // }
-  let result;
-  // ... your logic ...
-  return result;
-}
-`;
+  // How to access parameters for your function (e.g., ${funcName}) from 'params':
+  // ${funcParams.length > 1 ? paramDestructure : (funcParams.length === 1 && funcParams[0] !== 'params' ? `const ${funcParams[0]} = params; // Assuming params is the single input for ${funcName}` : "// If 'params' is an object: "+paramDestructure+"\n  // If 'params' is a single value, use it directly for your function's argument.")}
+
+  // --- Implement your logic in the function below ---
+  ${funcSignatureItself} {
+    // YOUR CODE HERE using ${funcParams.join(', ') || 'the input parameter'}
+    // Remember to return the result.
+    let result;
+    
+    // Example: console.log(${funcParams.join(', ') || 'params' });
+
+    return result;
+  }
+  // --- End of your logic ---
+
+  // Call your function with the extracted (or direct) parameters
+  return ${funcName}(${funcParams.map(p => funcParams.length > 1 ? p : (funcParams[0] !== 'params' ? p : 'params')).join(', ')});
+}`;
       case 'python':
         return `# Language: Python
 # Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
 # Problem: ${problemHint}
 
-# IMPORTANT: Your solution MUST be within a function named 'solve'.
-# This function will receive a single argument 'params'.
-#
-# If the test case input is a simple value (e.g., an integer 5, a string "hello"),
-# 'params' will be that value directly (e.g., params = 5).
-#
-# If the test case input is a complex structure (e.g., a JSON object like {"arr": [1,2,3], "k": 2} or a JSON array [1,2,3]),
-# 'params' will be the Python dictionary or list parsed from the JSON string input.
-# You can then access elements or keys from 'params' as needed.
-# Example for dictionary input: arr = params.get("arr")
-# Example for list input: first_element = params[0]
-
+${commonJsPythonHeader.replace(/\/\*\*/g, '"""').replace(/\*\//g, '"""').replace(/\/\//g, '#')}
 def solve(params):
-  # Your brilliant Python code here!
-  # Remember to return the result as per the problem's output specification.
-  result = None
-  # ... your logic ...
-  return result
+  # How to access parameters for your function (e.g., ${funcName}) from 'params':
+  # ${funcParams.length > 1 ? funcParams.map(p => `${p} = params.get("${p}")`).join('\n  # ') : (funcParams.length === 1 && funcParams[0] !== 'params' ? `${funcParams[0]} = params # Assuming params is the single input for ${funcName}` : "# If 'params' is a dict: "+funcParams.map(p => `${p} = params.get("${p}")`).join('\\n  # ') + "\\n  # If 'params' is a single value, use it directly.")}
+
+  # --- Implement your logic in the function below ---
+  ${funcSignatureItself.replace('function', 'def').replace(/\{/g, ':').replace(/\}/g, '')}
+    # YOUR CODE HERE using ${funcParams.join(', ') || 'the input parameter'}
+    # Remember to return the result.
+    result = None
+    
+    # Example: print(${funcParams.join(', ') || 'params'})
+
+    return result
+  # --- End of your logic ---
+
+  # Call your function with the extracted (or direct) parameters
+  return ${funcName}(${funcParams.map(p => funcParams.length > 1 ? p : (funcParams[0] !== 'params' ? p : 'params')).join(', ')})
 `;
       case 'cpp':
         return `// Language: C++
 // Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
 // Problem: ${problemHint}
+// Suggested problem function: ${currentQuestion?.functionSignature || "Not specified, structure as appropriate."}
 
 #include <iostream>
 #include <vector>
 #include <string>
-// Add other necessary headers. For JSON parsing, you might need a library like nlohmann/json.hpp (not directly runnable in client-side tests).
+#include <sstream> // For parsing complex inputs if needed
 
-// For C++, the AI evaluation will look for your main problem-solving logic.
-// Client-side testing for C++ is not supported.
+// For C++, client-side testing is not supported.
 // Structure your code to be understandable by the AI evaluator.
-// Typically, competitive programming solutions read from std::cin and print to std::cout.
+// Typically, competitive programming solutions might read from std::cin and print to std::cout,
+// OR implement the suggested function signature if provided, and ensure it's callable.
 
-// Example conceptual structure (adapt to problem specifics):
+// Example of using the suggested signature (if provided by AI as, e.g., "std::vector<int> twoSum(std::vector<int>& nums, int target)"):
 /*
-  // If the problem implies a function, you can define it:
-  return_type solve( /* appropriate C++ type(s) for parameters */ ) {
-      // ... your logic ...
-      return result;
-  }
+${currentQuestion?.functionSignature || "return_type your_function_name(parameters)"} {
+    // Your C++ code here
+    // Example:
+    // std::vector<int> result;
+    // for(int x : nums) { /* ... */ }
+    // return result;
+}
 
-  int main() {
-    // 1. Read input (e.g., from std::cin)
-    //    You might need to parse complex inputs if they are given as strings.
-    
-    // 2. Call your solving logic
-    //    auto result = solve(parsed_input_data);
+// If you structure with main for evaluation:
+int main() {
+    // 1. Read or define input based on problem statement.
+    //    If using a standard function like twoSum, you might not need main for AI eval,
+    //    but ensure the function is complete and correct.
+    //    Example if input is simple:
+    //    int n;
+    //    std::cin >> n;
+    //    std::cout << (n * 2) << std::endl;
 
-    // 3. Print output (e.g., to std::cout)
-    //    std::cout << result << std::endl;
+    // 2. If using your defined function:
+    //    std::vector<int> my_nums = {2, 7, 11, 15};
+    //    int my_target = 9;
+    //    std::vector<int> solution = twoSum(my_nums, my_target);
+    //    for (int i = 0; i < solution.size(); ++i) {
+    //        std::cout << solution[i] << (i == solution.size() - 1 ? "" : " ");
+    //    }
+    //    std::cout << std::endl;
     
     return 0;
-  }
+}
 */
 
-// Ensure your complete C++ solution is within this text area.
-// The AI will attempt to understand and evaluate it based on the problem.
+// Ensure your complete C++ solution is within this text area for AI evaluation.
 `;
       default:
         return "// Select a language to see a placeholder. Your main solution function for JavaScript/Python should be named 'solve(params)'.";
     }
   };
+
+  // Update code in textarea when language or question (with functionSignature) changes
+  useEffect(() => {
+    if (question) {
+      setCode(getCodePlaceholder(language, question));
+    }
+  }, [language, question]);
+
 
   const handleRunTests = async () => {
     if (!question || !question.testCases || !code) {
@@ -568,28 +625,26 @@ def solve(params):
 
         if (language === 'javascript') {
             try {
-                // Ensure the player's code is properly isolated and the 'solve' function is accessible.
                 const playerFunctionFactory = new Function(`
                     "use strict";
                     ${code}
                     if (typeof solve !== 'function') {
-                        throw new Error('The "solve" function is not defined or not a function in your code. Please ensure your main logic is in a function named "solve(params)".');
+                        throw new Error('The "solve" function is not defined or not a function in your code. Please ensure your main logic is within a function named "solve(params)".');
                     }
                     return solve;
                 `);
                 const playerSolveFunction = playerFunctionFactory();
                 
-                let parsedInput = tc.input; // Assume tc.input is a string
+                let parsedInput: any = tc.input; 
                 try {
-                    // Attempt to parse if it looks like JSON, otherwise use as a string (for primitive inputs like '5' or '"hello"')
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
-                    } else if (!isNaN(Number(tc.input))) { // Check if it's a plain number string
-                        // parsedInput = Number(tc.input); // Let solve function handle it as string or convert if needed
+                    } else if (!isNaN(Number(tc.input)) && tc.input.trim() !== '') {
+                        // parsedInput = Number(tc.input); // Let solve function handle as string or convert
+                    } else if (tc.input.startsWith('"') && tc.input.endsWith('"')) {
+                        // parsedInput = tc.input.slice(1, -1); // Pass inner string
                     }
                 } catch (e) {
-                    // Parsing failed, or it's not JSON. Use tc.input as is.
-                    // The 'solve' function should be robust enough to handle this based on problem spec.
                     console.warn("Test case input was not valid JSON, passing as string: ", tc.input);
                 }
                 
@@ -597,14 +652,13 @@ def solve(params):
                 try {
                     outputFromSolve = playerSolveFunction(parsedInput);
                 } catch (solveError: any) {
-                    // This catches errors specifically from the player's solve function execution
                     throw new Error(`Error during execution of your 'solve' function: ${solveError.message || String(solveError)}`);
                 }
                 
-                actualOutput = typeof outputFromSolve === 'object' ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
+                actualOutput = typeof outputFromSolve === 'object' && outputFromSolve !== null ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
 
                 let normalizedExpectedOutput = tc.expectedOutput;
-                try { // Normalize expected output by parsing and re-stringifying if it's JSON
+                try { 
                     const parsedExpected = JSON.parse(tc.expectedOutput);
                     normalizedExpectedOutput = JSON.stringify(parsedExpected); 
                 } catch (e) { /* not json, use as is for comparison */ }
@@ -614,7 +668,7 @@ def solve(params):
             } catch (error: any) { 
                 status = 'error';
                 actualOutput = "Error during test execution";
-                errorMessage = error.message || String(error); // Capture the (potentially re-thrown) error message
+                errorMessage = error.message || String(error); 
             }
         } else {
             status = 'client_unsupported';
@@ -937,7 +991,7 @@ def solve(params):
                   <Textarea
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
-                    placeholder={getCodePlaceholder(language)}
+                    placeholder={getCodePlaceholder(language, question)}
                     className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[300px]"
                     disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}
                   />
@@ -1041,7 +1095,6 @@ def solve(params):
     );
   }
 
-  // Fallback for unexpected game states
   return (
       <div className="flex flex-col items-center justify-center h-full p-4">
         <p className="mb-4">An unexpected state has occurred. Current state: {gameState}</p>
@@ -1051,8 +1104,6 @@ def solve(params):
   );
 }
 
-
-// Dialog component for leave/forfeit confirmation
 export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | null }) {
   if (!type) return null;
 
@@ -1080,7 +1131,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
