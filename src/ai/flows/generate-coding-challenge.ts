@@ -122,12 +122,21 @@ const generateCodingChallengeFlow = ai.defineFlow(
   },
   async input => {
     const {output} = await prompt(input);
-    if (output && output.difficulty !== input.targetDifficulty) {
+
+    // Check if output is null/undefined after the prompt call.
+    // This handles cases where the prompt doesn't throw an error but returns no valid output
+    // (e.g., due to content filtering by the model itself, or other non-exception issues).
+    if (!output) {
+      console.error('AI prompt for generateCodingChallenge returned no output.');
+      throw new Error('Failed to generate coding challenge content. The AI model did not provide a valid response.');
+    }
+
+    if (output.difficulty !== input.targetDifficulty) {
         console.warn(`Generated difficulty ${output.difficulty} does not match target ${input.targetDifficulty}. Overriding to target.`);
         output.difficulty = input.targetDifficulty; // Ensure difficulty matches target
     }
     // Validate test cases input/output format (basic check to ensure they are strings)
-    if (output && output.testCases) {
+    if (output.testCases) {
         output.testCases.forEach(tc => {
             if (typeof tc.input !== 'string') {
                 console.warn(`Test case input for "${tc.name}" is not a string: ${tc.input}. Forcing to string.`);
@@ -139,7 +148,7 @@ const generateCodingChallengeFlow = ai.defineFlow(
             }
         });
     }
-    return output!;
+    return output; // No longer using 'output!' as we've checked for !output above.
   }
 );
 
