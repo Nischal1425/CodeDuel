@@ -512,34 +512,47 @@ export default function ArenaPage() {
 
 
   const getCodePlaceholder = (selectedLang: SupportedLanguage, currentQuestion: GenerateCodingChallengeOutput | null): string => {
-    if (!currentQuestion?.functionSignature) {
-      const defaults = {
-        javascript: `function solve(params) {\n  // Your code here\n  return;\n}`,
-        python: `def solve(params):\n  # Your code here\n  pass`,
-        cpp: `#include <iostream>\n#include <vector>\n#include <string>\n\nclass Solution {\npublic:\n    // Define your method here, e.g. int solve(int input) { return 0; }\n};\n`
-      };
-      return defaults[selectedLang] || "// Select a language";
+    const signatureToUse = currentQuestion?.functionSignature;
+    let funcName = 'solve'; // Default
+    let funcParams = ['params']; // Default
+    let returnTypeHint = 'any'; // Default
+
+    if (signatureToUse) {
+        const parsed = parseFunctionSignature(signatureToUse, selectedLang);
+        funcName = parsed.name;
+        funcParams = parsed.params;
+        returnTypeHint = parsed.returnType;
     }
 
-    const { name: funcName, params: funcParamsList, signature: providedSignature, returnType } = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
+    const codeComment = "// Your code here";
+    const returnStatementJS = `return; // Expected return type: ${returnTypeHint}`;
+    const returnStatementPython = `return None # Expected return type: ${returnTypeHint}`;
+    const returnStatementCPP = `return {}; // Placeholder for ${returnTypeHint}, adjust as needed`;
+
 
     if (selectedLang === 'javascript') {
-      return `${providedSignature.replace(/\{\s*\}$/, '')} {\n  // Your code for ${funcName} here\n  // Expected return type: ${returnType}\n  \n  return; // Adjust return type as needed\n}`;
+        if (signatureToUse) {
+            return `function ${funcName}(${funcParams.join(', ')}) {\n  ${codeComment}\n  ${returnStatementJS}\n}`;
+        }
+        return `function solve(params) {\n  ${codeComment}\n  ${returnStatementJS}\n}`;
     } else if (selectedLang === 'python') {
-      const pythonSignature = providedSignature.endsWith(':') ? providedSignature : `${providedSignature}:`;
-      return `${pythonSignature.replace(/:\s*pass\s*$/i, ':').replace(/:\s*$/i, ':')}\n  # Your code for ${funcName} here\n  # Expected return type: ${returnType}\n  pass # Remove this line and implement\n  # return None # Adjust return type as needed`;
+        if (signatureToUse) {
+            return `def ${funcName}(${funcParams.join(', ')}):\n  ${codeComment}\n  pass # Remove this line and implement\n  # ${returnStatementPython}`;
+        }
+        return `def solve(params):\n  ${codeComment}\n  pass # Remove this line and implement\n  # ${returnStatementPython}`;
     } else if (selectedLang === 'cpp') {
-      const signatureOnly = providedSignature.replace(/\s*\{[^]*\}\s*$/, '');
-      let body = `\n  // Your code for ${funcName} here\n`;
-      if (returnType && returnType.toLowerCase() !== 'void' && !returnType.includes("std::ostream") && !returnType.startsWith("void")) {
-        body += `  // TODO: Expected return type: ${returnType}\n  return {}; // Placeholder, adjust as needed\n`;
-      } else if (returnType.includes("std::ostream") || returnType.startsWith("void")) {
-        body += `  // TODO: Implement logic. Print to cout if ostream, or ensure void function completes.\n`;
-      }
+        const headers = `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n#include <map>\n#include <set>\n// Add other necessary headers based on the problem\n\n// using namespace std; // Optional\n`;
+        let methodSignature = `void solve(/* parameters */)`; // Default C++ signature
+        let methodBody = `{\n  ${codeComment}\n  // ${returnTypeHint === 'void' ? '' : returnStatementCPP}\n}`;
 
-      return `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n#include <map>\n#include <set>\n// Add other necessary headers based on the problem\n\n// using namespace std; // Optional: uncomment if you prefer\n\nclass Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};\n\n// Optional main for local testing (will not be run by evaluator):\n/*\nint main() {\n    Solution sol;\n    // Example usage for '${funcName}': \n    // e.g., auto result = sol.${funcName}(...params...);\n    // std::cout for printing results if applicable.\n    return 0;\n}\n*/`;
+        if (signatureToUse) {
+            const parsed = parseFunctionSignature(signatureToUse, selectedLang); // Already parsed, but use it for clarity
+            methodSignature = `${parsed.returnType || 'void'} ${parsed.name || 'solve'}(${parsed.params.join(', ') || '/* params */'})`;
+        }
+        
+        return `${headers}\nclass Solution {\npublic:\n    ${methodSignature} ${methodBody}\n};\n\n// Optional main for local testing:\n/*\nint main() {\n    Solution sol;\n    // sol.${funcName}(...);\n    return 0;\n}\n*/`;
     }
-    return `// Placeholder for ${selectedLang} - Problem signature: ${currentQuestion.functionSignature}`;
+    return `// Placeholder for ${selectedLang}. Problem signature might be: ${signatureToUse || 'solve(params)'}`;
   };
 
 
@@ -572,34 +585,30 @@ export default function ArenaPage() {
                 try {
                     let parsedInput: any;
                     try {
-                        // Attempt to parse input if it looks like JSON, otherwise use as is.
                         if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                             parsedInput = JSON.parse(tc.input);
                         } else if (tc.input.startsWith('"') && tc.input.endsWith('"') && tc.input.length >= 2) {
-                             parsedInput = JSON.parse(tc.input); // JSON string literal
+                             parsedInput = JSON.parse(tc.input); 
                         } else if (tc.input.trim() !== '' && !isNaN(Number(tc.input))) {
-                             parsedInput = Number(tc.input); // Number
+                             parsedInput = Number(tc.input);
                         } else {
-                            parsedInput = tc.input; // Plain string or other primitive
+                            parsedInput = tc.input;
                         }
                     } catch (e) {
-                        console.warn("Test case input was not valid JSON or number, attempting to pass as string: ", tc.input, e);
-                        parsedInput = tc.input; // Fallback to raw string if parsing fails
+                        console.warn("Test case input was not valid JSON, attempting to pass as string: ", tc.input, e);
+                        parsedInput = tc.input;
                     }
                     
                     const playerCodeItself = code;
                     const functionNameToCall = signatureInfo.name;
-                    const functionParamsExpected = signatureInfo.params; // Names of parameters
+                    const functionParamsExpected = signatureInfo.params;
 
-                    // Dynamically construct the solve_wrapper and call it
-                    // This wrapper calls the player's actual function (e.g., twoSum)
-                    // with arguments derived from 'params_wrapper_arg' based on the function signature.
                     let scriptToRun = `
                         "use strict";
-                        // Player's submitted code (which defines '${functionNameToCall}'):
+                        // Player's submitted code (defines '${functionNameToCall}'):
                         ${playerCodeItself}
 
-                        // Wrapper to call the player's specific function from a generic solve(params_wrapper)
+                        // Wrapper to call the player's specific function
                         function solve_wrapper_for_test_runner(params_wrapper_arg) {
                           if (typeof ${functionNameToCall} !== 'function') {
                             throw new Error('The function "${functionNameToCall}" (expected from problem signature "${signatureInfo.signature}") is not found or not a function in your code. Please ensure it is defined correctly.');
@@ -608,79 +617,61 @@ export default function ArenaPage() {
                           let argsForPlayerFunc;
                           if (${functionParamsExpected.length} === 0) {
                               argsForPlayerFunc = [];
-                          } 
-                          // Single param expected by signature, and input is NOT an object (or is an array, which is an object type but usually treated as a single param)
-                          else if (${functionParamsExpected.length} === 1 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null || Array.isArray(params_wrapper_arg))) {
+                          } else if (${functionParamsExpected.length} === 1 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null || Array.isArray(params_wrapper_arg))) {
                               argsForPlayerFunc = [params_wrapper_arg];
-                          } 
-                          // Multiple params expected by signature, and input is an object (mapping param names to values)
-                          // Check if all expected param names are present in the input object
-                          else if (typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null && ${functionParamsExpected.length} > 0 && ${JSON.stringify(functionParamsExpected)}.every(p => params_wrapper_arg.hasOwnProperty(p)) ) {
+                          } else if (typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null && ${functionParamsExpected.length} > 0 && ${JSON.stringify(functionParamsExpected)}.every(p => params_wrapper_arg.hasOwnProperty(p))) {
                               argsForPlayerFunc = ${JSON.stringify(functionParamsExpected)}.map(paramName => params_wrapper_arg[paramName]);
-                          }
-                          // Single param expected by signature, and input IS an object. Pass it as is.
-                          else if (${functionParamsExpected.length} === 1 && typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null) {
+                          } else if (${functionParamsExpected.length} === 1 && typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null) {
                                 argsForPlayerFunc = [params_wrapper_arg];
-                          }
-                          // Fallback or mismatch:
-                          // This case covers situations where the input structure doesn't neatly map to expected params,
-                          // e.g. multiple params expected but input is not an object, or object keys don't match.
-                          else {
-                               console.warn("Input structure for test case doesn't perfectly match function signature's expected parameters. Passing input as a single argument. Input:", params_wrapper_arg, "Expected params by signature:", ${JSON.stringify(functionParamsExpected)});
-                               argsForPlayerFunc = [params_wrapper_arg]; // Pass the whole input as the first (or only) arg
+                          } else {
+                               console.warn("Input structure for test case doesn't perfectly match function signature. Passing input as a single argument. Input:", params_wrapper_arg, "Expected params by signature:", ${JSON.stringify(functionParamsExpected)});
+                               argsForPlayerFunc = [params_wrapper_arg];
                           }
                           return ${functionNameToCall}(...argsForPlayerFunc);
                         }
-                        // Call the wrapper with the parsed test case input
                         return solve_wrapper_for_test_runner(${typeof parsedInput === 'string' ? JSON.stringify(parsedInput) : JSON.stringify(parsedInput)});
                     `;
                     
                     let outputFromSolve;
                     try { 
-                      // This is where the player's code (wrapped) gets executed
                       const playerFunctionFactory = new Function(scriptToRun);
                       outputFromSolve = playerFunctionFactory();
                     } catch (solveError: any) {
-                        // Error occurred INSIDE the player's code or the wrapper
                         status = 'error';
                         actualOutput = "Execution Error";
                         errorMessage = solveError.message || String(solveError);
-                        console.error("Test execution error in player's code or wrapper:", solveError, "Input:", tc.input, "Script attempted:", scriptToRun);
+                        console.error("Test execution error in player's code or wrapper:", solveError, "Input:", tc.input);
                         results.push({
                             testCaseName: tc.name, input: tc.input, expectedOutput: tc.expectedOutput, actualOutput, status, errorMessage,
                             timeTaken: "N/A", memoryUsed: "N/A",
                         });
-                        continue; // Important: Move to the next test case
+                        continue; 
                     }
 
-                    // Normalize actual output for comparison
                     actualOutput = outputFromSolve === undefined ? "undefined" : (outputFromSolve === null ? "null" : (typeof outputFromSolve === 'object' ? JSON.stringify(outputFromSolve) : String(outputFromSolve)));
                     
-                    // Normalize expected output for comparison if it's a stringified object/array
                     let normalizedExpectedOutput = tc.expectedOutput;
                     try { 
                         const parsedExpected = JSON.parse(tc.expectedOutput);
-                        normalizedExpectedOutput = JSON.stringify(parsedExpected); // Stringify to ensure consistent comparison
+                        normalizedExpectedOutput = JSON.stringify(parsedExpected);
                     } catch (e) { /* not json, use as is */ }
 
                     status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
 
                 } catch (setupError: any) { 
-                    // Error in the test running setup itself (outside player code execution)
                     status = 'error';
                     actualOutput = "Error during test setup";
                     errorMessage = `Test setup error: ${setupError.message || String(setupError)}`;
                     console.error("Test setup error details:", setupError, "Input:", tc.input);
                 }
-            } else { // JavaScript, but signatureInfo is null (AI didn't provide signature or it's invalid)
+            } else { 
                 status = 'error';
                 actualOutput = 'N/A';
                 errorMessage = 'Cannot run JavaScript tests: Missing or invalid function signature in problem definition.';
             }
-        } else { // Not JavaScript (Python or C++)
+        } else { 
             status = 'client_unsupported';
             actualOutput = "N/A";
-            // Informational banner is shown in UI, no need for specific error message here
         }
 
         results.push({
@@ -689,9 +680,9 @@ export default function ArenaPage() {
             expectedOutput: tc.expectedOutput,
             actualOutput,
             status,
-            errorMessage, // This will be undefined for client_unsupported
-            timeTaken: "N/A", // Mocked
-            memoryUsed: "N/A", // Mocked
+            errorMessage, 
+            timeTaken: "N/A", 
+            memoryUsed: "N/A",
         });
     }
     setTestResults(results);
@@ -706,439 +697,452 @@ export default function ArenaPage() {
   }, [player, gameState]);
 
 
-  if (!player) {
-     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-xl">Loading player data...</p>
-      </div>
-    );
-  }
-
-  if (gameState === 'selectingLobby') {
-    return (
-      <div className="container mx-auto py-8 h-full flex flex-col justify-center">
-        <Card className="mb-8 shadow-lg">
-          <CardHeader className="text-center">
-            <Swords className="h-16 w-16 mx-auto text-primary mb-4"/>
-            <CardTitle className="text-3xl font-bold">Choose Your Arena</CardTitle>
-            <CardDescription className="text-lg">Select a lobby. Entry fees apply. Current Coins: {player.coins} <CoinsIcon className="inline h-5 w-5 text-yellow-500 align-text-bottom" /></CardDescription>
-          </CardHeader>
-          <CardContent className="grid md:grid-cols-3 gap-6">
-            {LOBBIES.map(lobby => (
-              <LobbyCard key={lobby.name} lobby={lobby} onSelectLobby={handleSelectLobby} disabled={player.coins < lobby.entryFee}/>
-            ))}
-          </CardContent>
-        </Card>
-        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
-      </div>
-    );
-  }
-
-  if (gameState === 'searching') {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-4">
-        <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
-        <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
-        <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
-        <p className="text-sm text-muted-foreground mt-1">Entry fee: {currentLobbyDetailsRef.current?.entryFee} <CoinsIcon className="inline h-3 w-3 text-yellow-500 align-baseline" /></p>
-        <Button variant="outline" onClick={() => triggerLeave('search')} className="mt-6">
-            <LogOut className="mr-2 h-4 w-4" /> Cancel Search & Leave Lobby
-        </Button>
-        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
-      </div>
-    );
-  }
-
-  if (gameState === 'submittingComparison') {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center p-4">
-        <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
-        <h2 className="text-2xl font-semibold text-foreground mb-2">Duel in Progress: AI Comparing Submissions...</h2>
-        <p className="text-muted-foreground">Our AI is evaluating both your and your opponent's solutions to determine the victor.</p>
-        <p className="text-sm text-muted-foreground mt-1">This might take a few moments.</p>
-      </div>
-    );
-  }
-
-  if (gameState === 'gameOver') {
-    const entryFeePaid = currentLobbyDetailsRef.current?.entryFee || 0;
-    let title = "Match Over";
-    let message = "";
-    let icon: React.ReactNode = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
-
-    switch(gameOverReason) {
-        case "comparison_player1_wins":
-            title = "Victory!";
-            const pot = entryFeePaid * 2;
-            const commission = Math.floor(pot * COMMISSION_RATE);
-            const netWinnings = pot - commission;
-            message = `You defeated ${mockOpponent?.username || 'your opponent'}! ${netWinnings} coins added. (Pot: ${pot}, Commission: ${commission})`;
-            icon = <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />;
-            break;
-        case "comparison_player2_wins":
-            title = "Defeat!";
-            message = `${mockOpponent?.username || 'Your opponent'} won the duel. You lost ${entryFeePaid} coins.`;
-            icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
-            break;
-        case "comparison_draw":
-            title = "It's a Draw!";
-            message = `The duel ended in a draw. Your entry fee of ${entryFeePaid} coins has been refunded.`;
-            icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
-            break;
-        case "timeup_player1_submitted_only":
-            title = comparisonResult?.winner === 'player1' ? "Victory by Timeout!" : "Close Call!";
-            const p1TimeoutWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
-            message = comparisonResult?.winner === 'player1'
-                ? `Your opponent timed out after you submitted! You won ${p1TimeoutWinnings} coins.`
-                : (comparisonResult?.winner === 'draw'
-                    ? `Your opponent timed out. The match was considered a draw. Your entry fee of ${entryFeePaid} coins has been refunded.`
-                    : `Your opponent timed out. Your solution was compared. You lost ${entryFeePaid} coins.`); // Loss case
-            icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
-            break;
-        case "timeup_player2_submitted_only":
-            title = "Defeat by Timeout";
-            message = `You ran out of time after your opponent submitted. You lost ${entryFeePaid} coins.`;
-            icon = <TimerIcon className="h-16 w-16 text-destructive mx-auto mb-4" />;
-            break;
-        case "timeup_both_submitted":
-             title = comparisonResult?.winner === 'player1' ? "Last Second Victory!" : (comparisonResult?.winner === 'player2' ? "Defeat at the Buzzer!" : "Draw at Timeout!");
-             const bothSubmittedWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
-             message = comparisonResult?.winner === 'player1'
-                ? `You won the duel right at the end! ${bothSubmittedWinnings} coins awarded.`
-                : (comparisonResult?.winner === 'player2'
-                    ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.`
-                    : `Duel ended in a draw at timeout. Your entry fee of ${entryFeePaid} coins has been refunded.`);
-            icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : (comparisonResult?.winner === 'player2' ? <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />);
-            break;
-        case "timeup_neither_submitted":
-            title = "Stalemate!";
-            message = `Neither you nor your opponent submitted in time. You both lost your entry fee of ${entryFeePaid} coins.`;
-            icon = <TimerIcon className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
-            break;
-        case "forfeit_player1":
-            title = "Match Forfeited";
-            message = `You forfeited the match and lost ${entryFeePaid} coins.`;
-            icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
-            break;
-        case "cancelledSearch":
-            title = "Search Cancelled";
-            message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`; // This message is more for internal state; actual toast handles user-facing.
-            icon = <LogOut className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-            break;
-        case "error":
-        default:
-            title = "Match Error";
-            message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins may have been lost. Please check your balance.`;
-            icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
-            break;
-    }
-
-    let winningCodeDisplay: { name: string | null; code: string | null } = { name: null, code: null };
-    if (comparisonResult && (comparisonResult.winner === 'player1' || comparisonResult.winner === 'player2')) {
-        if (comparisonResult.winner === 'player1' && player) {
-            winningCodeDisplay = { name: player.username, code: code };
-        } else if (comparisonResult.winner === 'player2' && mockOpponentRef.current) {
-            winningCodeDisplay = { name: mockOpponentRef.current.username, code: opponentCode };
-        }
-    }
-
-
-    return (
-      <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
-        <Card className={`shadow-xl ${gameOverReason === "comparison_player1_wins" ? 'border-green-500' : (gameOverReason === "comparison_player2_wins" || gameOverReason === "forfeit_player1" || gameOverReason === "error" ? 'border-destructive' : 'border-border')}`}>
-          <CardHeader className="text-center">
-            {icon}
-            <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
-            <CardDescription className="text-lg text-muted-foreground">
-              {message}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {comparisonResult && (gameOverReason.startsWith("comparison_") || gameOverReason.startsWith("timeup_")) && (
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="comparison-details">
-                  <AccordionTrigger className="text-lg hover:no-underline">
-                    <Brain className="mr-2 h-5 w-5 text-primary"/> Detailed AI Duel Report
-                  </AccordionTrigger>
-                  <AccordionContent className="space-y-4 pt-4">
-                    <div>
-                        <h4 className="font-semibold text-md text-foreground mb-1">Overall Duel Result:</h4>
-                        <p><span className="font-medium">Winner:</span> {comparisonResult.winner === 'player1' ? (player?.username || 'You') : (comparisonResult.winner === 'player2' ? (mockOpponent?.username || 'Opponent') : 'Draw')}</p>
-                        <p><span className="font-medium">Reason:</span> {comparisonResult.winningReason}</p>
-                        <p><span className="font-medium">Comparison Summary:</span> {comparisonResult.comparisonSummary}</p>
-                    </div>
-
-                    {winningCodeDisplay.code && winningCodeDisplay.name && (
-                      <div className="mt-4 pt-4 border-t">
-                        <h4 className="font-semibold text-md text-foreground mb-2">
-                          Winning Submission by {winningCodeDisplay.name}:
-                        </h4>
-                        <ScrollArea className="h-40 p-2 border rounded bg-muted/20">
-                          <pre className="whitespace-pre-wrap text-xs">
-                            {winningCodeDisplay.code}
-                          </pre>
-                        </ScrollArea>
-                      </div>
-                    )}
-
-                    <Accordion type="multiple" className="w-full space-y-2 pt-4">
-                        <AccordionItem value="player1-eval">
-                            <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Your Submission ({player?.username})</AccordionTrigger>
-                            <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
-                                <p><strong>Correctness:</strong> {comparisonResult.player1Evaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}</p>
-                                <p><strong>Explanation:</strong> {comparisonResult.player1Evaluation.correctnessExplanation}</p>
-                                <p><strong>Time Complexity:</strong> {comparisonResult.player1Evaluation.estimatedTimeComplexity}</p>
-                                <p><strong>Space Complexity:</strong> {comparisonResult.player1Evaluation.estimatedSpaceComplexity}</p>
-                                <p><strong>Quality Feedback:</strong></p>
-                                <ScrollArea className="h-20 p-1 border rounded text-xs bg-background"><pre className="whitespace-pre-wrap">{comparisonResult.player1Evaluation.codeQualityFeedback}</pre></ScrollArea>
-                                <p><strong>Overall:</strong> {comparisonResult.player1Evaluation.overallAssessment}</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                         <AccordionItem value="player2-eval">
-                            <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Opponent's Submission ({mockOpponent?.username})</AccordionTrigger>
-                            <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
-                                <p><strong>Correctness:</strong> {comparisonResult.player2Evaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}</p>
-                                <p><strong>Explanation:</strong> {comparisonResult.player2Evaluation.correctnessExplanation}</p>
-                                <p><strong>Time Complexity:</strong> {comparisonResult.player2Evaluation.estimatedTimeComplexity}</p>
-                                <p><strong>Space Complexity:</strong> {comparisonResult.player2Evaluation.estimatedSpaceComplexity}</p>
-                                <p><strong>Quality Feedback:</strong></p>
-                                <ScrollArea className="h-20 p-1 border rounded text-xs bg-background"><pre className="whitespace-pre-wrap">{comparisonResult.player2Evaluation.codeQualityFeedback}</pre></ScrollArea>
-                                <p><strong>Overall:</strong> {comparisonResult.player2Evaluation.overallAssessment}</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                    </Accordion>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-            )}
-            <div className="text-center text-muted-foreground">
-                Your coins: {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
-            </div>
-            <Button onClick={() => { resetGameState(true); setGameOverReason("error"); }} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
-             Play Again (Back to Lobbies)
-            </Button>
-          </CardContent>
-        </Card>
-        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
-      </div>
-    );
-  }
-
-
-  if (gameState === 'inGame') {
-    if (isLoadingQuestion && !question) {
-      return (
+  // Main content rendering logic
+  const renderContent = () => {
+    if (!player && gameState !== 'selectingLobby') { // Ensure player data is loaded unless just selecting lobby
+       return (
         <div className="flex items-center justify-center h-full">
           <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <p className="ml-4 text-xl">Loading your challenge...</p>
+          <p className="ml-4 text-xl">Loading player data...</p>
         </div>
       );
     }
-    if (errorLoadingQuestion) {
-       return (
-        <div className="flex flex-col items-center justify-center h-full text-center p-4">
-            <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
-            <p className="text-xl text-destructive mb-2">{errorLoadingQuestion}</p>
-            <Button onClick={() => resetGameState(true)}>Back to Lobbies</Button>
-            <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
+
+    if (gameState === 'selectingLobby') {
+      return (
+        <div className="container mx-auto py-8 h-full flex flex-col justify-center">
+          <Card className="mb-8 shadow-lg">
+            <CardHeader className="text-center">
+              <Swords className="h-16 w-16 mx-auto text-primary mb-4"/>
+              <CardTitle className="text-3xl font-bold">Choose Your Arena</CardTitle>
+              <CardDescription className="text-lg">Select a lobby. Entry fees apply. Current Coins: {player?.coins ?? 0} <CoinsIcon className="inline h-5 w-5 text-yellow-500 align-text-bottom" /></CardDescription>
+            </CardHeader>
+            <CardContent className="grid md:grid-cols-3 gap-6">
+              {LOBBIES.map(lobby => (
+                <LobbyCard key={lobby.name} lobby={lobby} onSelectLobby={handleSelectLobby} disabled={!player || player.coins < lobby.entryFee}/>
+              ))}
+            </CardContent>
+          </Card>
         </div>
-       );
+      );
     }
-    if (!question || !mockOpponent || !currentLobbyDetailsRef.current) {
-       return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
+
+    if (gameState === 'searching') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center p-4">
+          <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
+          <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
+          <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby for players around <span className="font-medium text-primary">Rank {player?.rank}</span>.</p>
+          <p className="text-sm text-muted-foreground mt-1">Entry fee: {currentLobbyDetailsRef.current?.entryFee} <CoinsIcon className="inline h-3 w-3 text-yellow-500 align-baseline" /></p>
+          <Button variant="outline" onClick={() => triggerLeave('search')} className="mt-6">
+              <LogOut className="mr-2 h-4 w-4" /> Cancel Search & Leave Lobby
+          </Button>
+        </div>
+      );
+    }
+
+    if (gameState === 'submittingComparison') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-center p-4">
+          <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
+          <h2 className="text-2xl font-semibold text-foreground mb-2">Duel in Progress: AI Comparing Submissions...</h2>
+          <p className="text-muted-foreground">Our AI is evaluating both your and your opponent's solutions to determine the victor.</p>
+          <p className="text-sm text-muted-foreground mt-1">This might take a few moments.</p>
+        </div>
+      );
+    }
+
+    if (gameState === 'gameOver') {
+      const entryFeePaid = currentLobbyDetailsRef.current?.entryFee || 0;
+      let title = "Match Over";
+      let message = "";
+      let icon: React.ReactNode = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
+
+      switch(gameOverReason) {
+          case "comparison_player1_wins":
+              title = "Victory!";
+              const pot = entryFeePaid * 2;
+              const commission = Math.floor(pot * COMMISSION_RATE);
+              const netWinnings = pot - commission;
+              message = `You defeated ${mockOpponent?.username || 'your opponent'}! ${netWinnings} coins added. (Pot: ${pot}, Commission: ${commission})`;
+              icon = <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />;
+              break;
+          case "comparison_player2_wins":
+              title = "Defeat!";
+              message = `${mockOpponent?.username || 'Your opponent'} won the duel. You lost ${entryFeePaid} coins.`;
+              icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
+              break;
+          case "comparison_draw":
+              title = "It's a Draw!";
+              message = `The duel ended in a draw. Your entry fee of ${entryFeePaid} coins has been refunded.`;
+              icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
+              break;
+          case "timeup_player1_submitted_only":
+              title = comparisonResult?.winner === 'player1' ? "Victory by Timeout!" : "Close Call!";
+              const p1TimeoutWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
+              message = comparisonResult?.winner === 'player1'
+                  ? `Your opponent timed out after you submitted! You won ${p1TimeoutWinnings} coins.`
+                  : (comparisonResult?.winner === 'draw'
+                      ? `Your opponent timed out. The match was considered a draw. Your entry fee of ${entryFeePaid} coins has been refunded.`
+                      : `Your opponent timed out. Your solution was compared. You lost ${entryFeePaid} coins.`); // Loss case
+              icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
+              break;
+          case "timeup_player2_submitted_only":
+              title = "Defeat by Timeout";
+              message = `You ran out of time after your opponent submitted. You lost ${entryFeePaid} coins.`;
+              icon = <TimerIcon className="h-16 w-16 text-destructive mx-auto mb-4" />;
+              break;
+          case "timeup_both_submitted":
+               title = comparisonResult?.winner === 'player1' ? "Last Second Victory!" : (comparisonResult?.winner === 'player2' ? "Defeat at the Buzzer!" : "Draw at Timeout!");
+               const bothSubmittedWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
+               message = comparisonResult?.winner === 'player1'
+                  ? `You won the duel right at the end! ${bothSubmittedWinnings} coins awarded.`
+                  : (comparisonResult?.winner === 'player2'
+                      ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.`
+                      : `Duel ended in a draw at timeout. Your entry fee of ${entryFeePaid} coins has been refunded.`);
+              icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : (comparisonResult?.winner === 'player2' ? <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />);
+              break;
+          case "timeup_neither_submitted":
+              title = "Stalemate!";
+              message = `Neither you nor your opponent submitted in time. You both lost your entry fee of ${entryFeePaid} coins.`;
+              icon = <TimerIcon className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
+              break;
+          case "forfeit_player1":
+              title = "Match Forfeited";
+              message = `You forfeited the match and lost ${entryFeePaid} coins.`;
+              icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
+              break;
+          case "cancelledSearch":
+              title = "Search Cancelled";
+              message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`; 
+              icon = <LogOut className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+              break;
+          case "error":
+          default:
+              title = "Match Error";
+              message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins may have been lost. Please check your balance.`;
+              icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
+              break;
+      }
+
+      let winningCodeDisplay: { name: string | null; code: string | null } = { name: null, code: null };
+      if (comparisonResult && (comparisonResult.winner === 'player1' || comparisonResult.winner === 'player2')) {
+          if (comparisonResult.winner === 'player1' && player) {
+              winningCodeDisplay = { name: player.username, code: code };
+          } else if (comparisonResult.winner === 'player2' && mockOpponentRef.current) {
+              winningCodeDisplay = { name: mockOpponentRef.current.username, code: opponentCode };
+          }
+      }
+
+      return (
+        <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
+          <Card className={`shadow-xl ${gameOverReason === "comparison_player1_wins" ? 'border-green-500' : (gameOverReason === "comparison_player2_wins" || gameOverReason === "forfeit_player1" || gameOverReason === "error" ? 'border-destructive' : 'border-border')}`}>
+            <CardHeader className="text-center">
+              {icon}
+              <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
+              <CardDescription className="text-lg text-muted-foreground">
+                {message}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {comparisonResult && (gameOverReason.startsWith("comparison_") || gameOverReason.startsWith("timeup_")) && (
+                <Accordion type="single" collapsible className="w-full">
+                  <AccordionItem value="comparison-details">
+                    <AccordionTrigger className="text-lg hover:no-underline">
+                      <Brain className="mr-2 h-5 w-5 text-primary"/> Detailed AI Duel Report
+                    </AccordionTrigger>
+                    <AccordionContent className="space-y-4 pt-4">
+                      <div>
+                          <h4 className="font-semibold text-md text-foreground mb-1">Overall Duel Result:</h4>
+                          <p><span className="font-medium">Winner:</span> {comparisonResult.winner === 'player1' ? (player?.username || 'You') : (comparisonResult.winner === 'player2' ? (mockOpponent?.username || 'Opponent') : 'Draw')}</p>
+                          <p><span className="font-medium">Reason:</span> {comparisonResult.winningReason}</p>
+                          <p><span className="font-medium">Comparison Summary:</span> {comparisonResult.comparisonSummary}</p>
+                      </div>
+
+                      {winningCodeDisplay.code && winningCodeDisplay.name && (
+                        <div className="mt-4 pt-4 border-t">
+                          <h4 className="font-semibold text-md text-foreground mb-2">
+                            Winning Submission by {winningCodeDisplay.name}:
+                          </h4>
+                          <ScrollArea className="h-40 p-2 border rounded bg-muted/20">
+                            <pre className="whitespace-pre-wrap text-xs">
+                              {winningCodeDisplay.code}
+                            </pre>
+                          </ScrollArea>
+                        </div>
+                      )}
+
+                      <Accordion type="multiple" className="w-full space-y-2 pt-4">
+                          <AccordionItem value="player1-eval">
+                              <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Your Submission ({player?.username})</AccordionTrigger>
+                              <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
+                                  <p><strong>Correctness:</strong> {comparisonResult.player1Evaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}</p>
+                                  <p><strong>Explanation:</strong> {comparisonResult.player1Evaluation.correctnessExplanation}</p>
+                                  <p><strong>Time Complexity:</strong> {comparisonResult.player1Evaluation.estimatedTimeComplexity}</p>
+                                  <p><strong>Space Complexity:</strong> {comparisonResult.player1Evaluation.estimatedSpaceComplexity}</p>
+                                  <p><strong>Quality Feedback:</strong></p>
+                                  <ScrollArea className="h-20 p-1 border rounded text-xs bg-background"><pre className="whitespace-pre-wrap">{comparisonResult.player1Evaluation.codeQualityFeedback}</pre></ScrollArea>
+                                  <p><strong>Overall:</strong> {comparisonResult.player1Evaluation.overallAssessment}</p>
+                              </AccordionContent>
+                          </AccordionItem>
+                           <AccordionItem value="player2-eval">
+                              <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Opponent's Submission ({mockOpponent?.username})</AccordionTrigger>
+                              <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
+                                  <p><strong>Correctness:</strong> {comparisonResult.player2Evaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}</p>
+                                  <p><strong>Explanation:</strong> {comparisonResult.player2Evaluation.correctnessExplanation}</p>
+                                  <p><strong>Time Complexity:</strong> {comparisonResult.player2Evaluation.estimatedTimeComplexity}</p>
+                                  <p><strong>Space Complexity:</strong> {comparisonResult.player2Evaluation.estimatedSpaceComplexity}</p>
+                                  <p><strong>Quality Feedback:</strong></p>
+                                  <ScrollArea className="h-20 p-1 border rounded text-xs bg-background"><pre className="whitespace-pre-wrap">{comparisonResult.player2Evaluation.codeQualityFeedback}</pre></ScrollArea>
+                                  <p><strong>Overall:</strong> {comparisonResult.player2Evaluation.overallAssessment}</p>
+                              </AccordionContent>
+                          </AccordionItem>
+                      </Accordion>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              )}
+              <div className="text-center text-muted-foreground">
+                  Your coins: {player?.coins ?? 0} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
+              </div>
+              <Button onClick={() => { resetGameState(true); setGameOverReason("error"); }} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+               Play Again (Back to Lobbies)
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
+    if (gameState === 'inGame') {
+      if (isLoadingQuestion && !question) {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <p className="ml-4 text-xl">Loading your challenge...</p>
+          </div>
+        );
+      }
+      if (errorLoadingQuestion) {
+         return (
+          <div className="flex flex-col items-center justify-center h-full text-center p-4">
+              <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
+              <p className="text-xl text-destructive mb-2">{errorLoadingQuestion}</p>
+              <Button onClick={() => resetGameState(true)}>Back to Lobbies</Button>
+          </div>
+         );
+      }
+      if (!question || !mockOpponent || !currentLobbyDetailsRef.current || !player) {
+         return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
+      }
+
+      return (
+        <div className="flex flex-col gap-4 h-full p-4 md:p-6">
+          <Card className="shadow-md shrink-0">
+            <CardContent className="p-3 flex justify-around items-center text-sm">
+              <div className="flex items-center gap-2">
+                <UserSquare2 className="h-8 w-8 text-blue-500" />
+                <div>
+                  <p className="font-semibold text-foreground">{player.username} (You)</p>
+                  <p className="text-muted-foreground">Coins: {player.coins} <CoinsIcon className="inline h-3 w-3 text-yellow-500" /> | Rank: {player.rank}</p>
+                </div>
+              </div>
+              <div className="text-center">
+                   <Swords className="h-6 w-6 text-muted-foreground mx-auto"/>
+                   <p className="text-xs text-primary font-medium">{currentLobbyDetailsRef.current.title}</p>
+                   <p className="text-xs text-yellow-600">Wager: {currentLobbyDetailsRef.current.entryFee} <CoinsIcon className="inline h-3 w-3" /></p>
+              </div>
+              <div className="flex items-center gap-2">
+                <UserSquare2 className="h-8 w-8 text-red-500" />
+                <div>
+                  <p className="font-semibold text-foreground">{mockOpponent.username}</p>
+                  <p className="text-muted-foreground">Coins: {mockOpponent.coins} <CoinsIcon className="inline h-3 w-3 text-yellow-500" /> | Rank: {mockOpponent.rank}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
+              <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
+                <CardHeader className="bg-card-foreground/5">
+                    <div className="flex justify-between items-center">
+                        <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
+                        <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
+                    </div>
+                </CardHeader>
+                <CardContent className="p-0 flex-grow overflow-y-auto">
+                    <ProblemDisplay question={question} />
+                </CardContent>
+              </Card>
+
+              <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
+                <CardHeader className="bg-card-foreground/5">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                          <CardTitle className="text-2xl">Your Solution</CardTitle>
+                          <TooltipProvider>
+                              <Tooltip>
+                                  <TooltipTrigger asChild>
+                                      <HelpCircle className="h-5 w-5 text-muted-foreground cursor-help" />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom" className="max-w-xs">
+                                      <p>The AI will analyze your code for correctness, efficiency, and quality compared to the reference solution and opponent.</p>
+                                  </TooltipContent>
+                              </Tooltip>
+                          </TooltipProvider>
+                      </div>
+                      <Select value={language} onValueChange={(value) => setLanguage(value as SupportedLanguage)} disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}>
+                          <SelectTrigger className="w-[180px] bg-background">
+                          <SelectValue placeholder="Select language" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="javascript">JavaScript</SelectItem>
+                            <SelectItem value="python">Python</SelectItem>
+                            <SelectItem value="cpp">C++</SelectItem>
+                          </SelectContent>
+                      </Select>
+                    </div>
+                    <CardDescription>Write your code below. Defeat {mockOpponent.username}!</CardDescription>
+                    {opponentHasSubmittedCode && !playerHasSubmittedCode && timeRemaining > 0 && (
+                      <p className="mt-2 text-sm text-yellow-600 animate-pulse">Opponent has submitted! Your turn.</p>
+                    )}
+                    {playerHasSubmittedCode && !opponentHasSubmittedCode && timeRemaining > 0 && (
+                      <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>
+                    )}
+                </CardHeader>
+                <CardContent className="flex-grow p-4 flex flex-col min-h-0">
+                    <Textarea
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      placeholder={getCodePlaceholder(language, question)}
+                      className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[300px]"
+                      disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}
+                    />
+                </CardContent>
+                <Accordion type="single" collapsible className="w-full px-4 pb-2">
+                  <AccordionItem value="test-cases">
+                      <AccordionTrigger className="text-md hover:no-underline py-2">
+                          <PlaySquare className="mr-2 h-5 w-5 text-muted-foreground"/> View & Run Test Cases
+                      </AccordionTrigger>
+                      <AccordionContent className="space-y-3 pt-2">
+                          {question.testCases && question.testCases.length > 0 ? (
+                              <>
+                                  <div className="max-h-48 overflow-y-auto pr-2">
+                                      <Table>
+                                          <TableHeader>
+                                              <TableRow>
+                                                  <TableHead>Name</TableHead>
+                                                  <TableHead>Input</TableHead>
+                                                  <TableHead>Expected Output</TableHead>
+                                              </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                              {question.testCases.map((tc, idx) => (
+                                                  <TableRow key={idx}>
+                                                      <TableCell className="font-medium text-xs">{tc.name}</TableCell>
+                                                      <TableCell className="text-xs"><pre className="whitespace-pre-wrap bg-muted/50 p-1 rounded text-xs">{tc.input}</pre></TableCell>
+                                                      <TableCell className="text-xs"><pre className="whitespace-pre-wrap bg-muted/50 p-1 rounded text-xs">{tc.expectedOutput}</pre></TableCell>
+                                                  </TableRow>
+                                              ))}
+                                          </TableBody>
+                                      </Table>
+                                  </div>
+                                  <Button onClick={handleRunTests} disabled={isTestingCode || !code.trim() || playerHasSubmittedCode || timeRemaining === 0} className="w-full mt-2" variant="outline">
+                                      {isTestingCode ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Run My Code Against Tests
+                                  </Button>
+                                  {language !== 'javascript' && (
+                                    <div className="mt-2 p-2 text-xs text-muted-foreground bg-muted rounded-md flex items-start">
+                                      <Info size={16} className="mr-2 mt-0.5 shrink-0 text-blue-500"/>
+                                      Client-side test execution for {language.toUpperCase()} is not supported. Please verify logic manually. AI evaluation on submission will process your code.
+                                    </div>
+                                  )}
+                                  {testResults.length > 0 && (
+                                      <ScrollArea className="mt-2 max-h-48">
+                                          <Table>
+                                              <TableHeader>
+                                                  <TableRow>
+                                                      <TableHead>Test</TableHead>
+                                                      <TableHead>Status</TableHead>
+                                                      <TableHead>Actual Output</TableHead>
+                                                      <TableHead>Time</TableHead>
+                                                      <TableHead>Memory</TableHead>
+                                                  </TableRow>
+                                              </TableHeader>
+                                              <TableBody>
+                                                  {testResults.map((res, idx) => (
+                                                      <TableRow key={idx} className={res.status === 'pass' ? 'bg-green-500/10' : (res.status === 'fail' ? 'bg-red-500/10' : (res.status === 'error' ? 'bg-yellow-500/10' : ''))}>
+                                                          <TableCell className="font-medium text-xs">{res.testCaseName}</TableCell>
+                                                          <TableCell>
+                                                              <Badge variant={res.status === 'pass' ? 'default' : (res.status === 'fail' || res.status === 'error' ? 'destructive' : 'secondary')}
+                                                                     className={cn("capitalize text-xs", 
+                                                                                  res.status === 'pass' ? 'bg-green-500 text-white hover:bg-green-600' : 
+                                                                                  (res.status === 'client_unsupported' ? 'bg-muted hover:bg-muted/80 text-muted-foreground' : ''))}>
+                                                                  {res.status === 'client_unsupported' ? 'Manual Check' : res.status}
+                                                              </Badge>
+                                                          </TableCell>
+                                                          <TableCell className="text-xs">
+                                                              <pre className="whitespace-pre-wrap max-w-xs truncate">{res.actualOutput}</pre>
+                                                              {res.errorMessage && <p className="text-destructive text-xs mt-1">{res.errorMessage}</p>}
+                                                          </TableCell>
+                                                          <TableCell className="text-xs">{res.timeTaken}</TableCell>
+                                                          <TableCell className="text-xs">{res.memoryUsed}</TableCell>
+                                                      </TableRow>
+                                                  ))}
+                                              </TableBody>
+                                          </Table>
+                                      </ScrollArea>
+                                  )}
+                              </>
+                          ) : <p className="text-sm text-muted-foreground">No test cases provided for this challenge.</p>}
+                      </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+                <div className="p-4 border-t flex flex-col gap-2">
+                    <Button
+                      onClick={handleSubmitCode}
+                      disabled={isComparing || playerHasSubmittedCode || !code.trim() || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'}
+                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+                    >
+                    {gameStateRef.current === 'submittingComparison' ? (<Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (<Send className="mr-2 h-4 w-4" />)}
+                    {playerHasSubmittedCode ? "Code Submitted" : "Submit for Final AI Duel"}
+                    </Button>
+                    <Button variant="outline" onClick={() => triggerLeave('game')} disabled={isComparing || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'} className="w-full">
+                        <Flag className="mr-2 h-4 w-4" /> Forfeit Match
+                    </Button>
+                    {timeRemaining === 0 && !playerHasSubmittedCode && (
+                     <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Your solution will be considered a non-submission.</p>
+                    )}
+                </div>
+              </Card>
+          </div>
+        </div>
+      );
     }
 
     return (
-      <div className="flex flex-col gap-4 h-full p-4 md:p-6">
-        <Card className="shadow-md shrink-0">
-          <CardContent className="p-3 flex justify-around items-center text-sm">
-            <div className="flex items-center gap-2">
-              <UserSquare2 className="h-8 w-8 text-blue-500" />
-              <div>
-                <p className="font-semibold text-foreground">{player.username} (You)</p>
-                <p className="text-muted-foreground">Coins: {player.coins} <CoinsIcon className="inline h-3 w-3 text-yellow-500" /> | Rank: {player.rank}</p>
-              </div>
-            </div>
-            <div className="text-center">
-                 <Swords className="h-6 w-6 text-muted-foreground mx-auto"/>
-                 <p className="text-xs text-primary font-medium">{currentLobbyDetailsRef.current.title}</p>
-                 <p className="text-xs text-yellow-600">Wager: {currentLobbyDetailsRef.current.entryFee} <CoinsIcon className="inline h-3 w-3" /></p>
-            </div>
-            <div className="flex items-center gap-2">
-              <UserSquare2 className="h-8 w-8 text-red-500" />
-              <div>
-                <p className="font-semibold text-foreground">{mockOpponent.username}</p>
-                <p className="text-muted-foreground">Coins: {mockOpponent.coins} <CoinsIcon className="inline h-3 w-3 text-yellow-500" /> | Rank: {mockOpponent.rank}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
-            <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-              <CardHeader className="bg-card-foreground/5">
-                  <div className="flex justify-between items-center">
-                      <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
-                      <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
-                  </div>
-              </CardHeader>
-              <CardContent className="p-0 flex-grow overflow-y-auto">
-                  <ProblemDisplay question={question} />
-              </CardContent>
-            </Card>
-
-            <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-              <CardHeader className="bg-card-foreground/5">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                        <CardTitle className="text-2xl">Your Solution</CardTitle>
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <HelpCircle className="h-5 w-5 text-muted-foreground cursor-help" />
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom" className="max-w-xs">
-                                    <p>The AI will analyze your code for correctness, efficiency, and quality compared to the reference solution and opponent.</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
-                    <Select value={language} onValueChange={(value) => setLanguage(value as SupportedLanguage)} disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}>
-                        <SelectTrigger className="w-[180px] bg-background">
-                        <SelectValue placeholder="Select language" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="javascript">JavaScript</SelectItem>
-                          <SelectItem value="python">Python</SelectItem>
-                          <SelectItem value="cpp">C++</SelectItem>
-                        </SelectContent>
-                    </Select>
-                  </div>
-                  <CardDescription>Write your code below. Defeat {mockOpponent.username}!</CardDescription>
-                  {opponentHasSubmittedCode && !playerHasSubmittedCode && timeRemaining > 0 && (
-                    <p className="mt-2 text-sm text-yellow-600 animate-pulse">Opponent has submitted! Your turn.</p>
-                  )}
-                  {playerHasSubmittedCode && !opponentHasSubmittedCode && timeRemaining > 0 && (
-                    <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>
-                  )}
-              </CardHeader>
-              <CardContent className="flex-grow p-4 flex flex-col min-h-0">
-                  <Textarea
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    placeholder={getCodePlaceholder(language, question)}
-                    className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[300px]"
-                    disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}
-                  />
-              </CardContent>
-              <Accordion type="single" collapsible className="w-full px-4 pb-2">
-                <AccordionItem value="test-cases">
-                    <AccordionTrigger className="text-md hover:no-underline py-2">
-                        <PlaySquare className="mr-2 h-5 w-5 text-muted-foreground"/> View & Run Test Cases
-                    </AccordionTrigger>
-                    <AccordionContent className="space-y-3 pt-2">
-                        {question.testCases && question.testCases.length > 0 ? (
-                            <>
-                                <div className="max-h-48 overflow-y-auto pr-2">
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Name</TableHead>
-                                                <TableHead>Input</TableHead>
-                                                <TableHead>Expected Output</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {question.testCases.map((tc, idx) => (
-                                                <TableRow key={idx}>
-                                                    <TableCell className="font-medium text-xs">{tc.name}</TableCell>
-                                                    <TableCell className="text-xs"><pre className="whitespace-pre-wrap bg-muted/50 p-1 rounded text-xs">{tc.input}</pre></TableCell>
-                                                    <TableCell className="text-xs"><pre className="whitespace-pre-wrap bg-muted/50 p-1 rounded text-xs">{tc.expectedOutput}</pre></TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                                <Button onClick={handleRunTests} disabled={isTestingCode || !code.trim() || playerHasSubmittedCode || timeRemaining === 0} className="w-full mt-2" variant="outline">
-                                    {isTestingCode ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Run My Code Against Tests
-                                </Button>
-                                {language !== 'javascript' && (
-                                  <div className="mt-2 p-2 text-xs text-muted-foreground bg-muted rounded-md flex items-start">
-                                    <Info size={16} className="mr-2 mt-0.5 shrink-0 text-blue-500"/>
-                                    Client-side test execution for {language.toUpperCase()} is not supported. Please verify logic manually. AI evaluation on submission will process your code.
-                                  </div>
-                                )}
-                                {testResults.length > 0 && (
-                                    <ScrollArea className="mt-2 max-h-48">
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow>
-                                                    <TableHead>Test</TableHead>
-                                                    <TableHead>Status</TableHead>
-                                                    <TableHead>Actual Output</TableHead>
-                                                    <TableHead>Time</TableHead>
-                                                    <TableHead>Memory</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {testResults.map((res, idx) => (
-                                                    <TableRow key={idx} className={res.status === 'pass' ? 'bg-green-500/10' : (res.status === 'fail' ? 'bg-red-500/10' : (res.status === 'error' ? 'bg-yellow-500/10' : ''))}>
-                                                        <TableCell className="font-medium text-xs">{res.testCaseName}</TableCell>
-                                                        <TableCell>
-                                                            <Badge variant={res.status === 'pass' ? 'default' : (res.status === 'fail' || res.status === 'error' ? 'destructive' : 'secondary')}
-                                                                   className={cn("capitalize text-xs", 
-                                                                                res.status === 'pass' ? 'bg-green-500 text-white hover:bg-green-600' : 
-                                                                                (res.status === 'client_unsupported' ? 'bg-muted hover:bg-muted/80 text-muted-foreground' : ''))}>
-                                                                {res.status === 'client_unsupported' ? 'Manual Check' : res.status}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell className="text-xs">
-                                                            <pre className="whitespace-pre-wrap max-w-xs truncate">{res.actualOutput}</pre>
-                                                            {res.errorMessage && <p className="text-destructive text-xs mt-1">{res.errorMessage}</p>}
-                                                        </TableCell>
-                                                        <TableCell className="text-xs">{res.timeTaken}</TableCell>
-                                                        <TableCell className="text-xs">{res.memoryUsed}</TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </ScrollArea>
-                                )}
-                            </>
-                        ) : <p className="text-sm text-muted-foreground">No test cases provided for this challenge.</p>}
-                    </AccordionContent>
-                </AccordionItem>
-              </Accordion>
-              <div className="p-4 border-t flex flex-col gap-2">
-                  <Button
-                    onClick={handleSubmitCode}
-                    disabled={isComparing || playerHasSubmittedCode || !code.trim() || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'}
-                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-                  >
-                  {gameStateRef.current === 'submittingComparison' ? (<Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (<Send className="mr-2 h-4 w-4" />)}
-                  {playerHasSubmittedCode ? "Code Submitted" : "Submit for Final AI Duel"}
-                  </Button>
-                  <Button variant="outline" onClick={() => triggerLeave('game')} disabled={isComparing || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'} className="w-full">
-                      <Flag className="mr-2 h-4 w-4" /> Forfeit Match
-                  </Button>
-                  {timeRemaining === 0 && !playerHasSubmittedCode && (
-                   <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Your solution will be considered a non-submission.</p>
-                  )}
-              </div>
-            </Card>
+        <div className="flex flex-col items-center justify-center h-full p-4">
+          <p className="mb-4">An unexpected state has occurred. Current state: {gameState}</p>
+          <Button onClick={() => resetGameState(true)}>Return to Lobby Selection</Button>
         </div>
-        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
-      </div>
     );
   }
 
+  // Determine if the current game state should render in full-screen overlay
+  const isFullScreenState = gameState === 'searching' || gameState === 'inGame' || gameState === 'submittingComparison' || gameState === 'gameOver';
+
   return (
-      <div className="flex flex-col items-center justify-center h-full p-4">
-        <p className="mb-4">An unexpected state has occurred. Current state: {gameState}</p>
-        <Button onClick={() => resetGameState(true)}>Return to Lobby Selection</Button>
-        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
-      </div>
+    <>
+      {!isFullScreenState && renderContent()}
+      {isFullScreenState && (
+        <div className="fixed inset-0 bg-background z-50 flex flex-col items-stretch justify-start p-0 overflow-auto">
+          {/* For full screen states, we want them to take up all available space */}
+          <div className="flex-grow flex flex-col">
+             {renderContent()}
+          </div>
+        </div>
+      )}
+      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
+    </>
   );
 }
 
@@ -1152,7 +1156,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent className="z-[100]"> {/* Ensure dialog is above the fixed overlay */}
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -1169,5 +1173,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    

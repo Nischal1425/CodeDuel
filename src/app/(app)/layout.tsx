@@ -6,7 +6,7 @@ import { AppNavigation } from '@/components/AppNavigation';
 import { UserDisplay } from '@/components/UserDisplay';
 import { CodeDuelLogo } from '@/components/CodeDuelLogo';
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // Removed usePathname as it's no longer needed here for this logic
 import React, { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 
@@ -41,7 +41,6 @@ export default function AuthenticatedAppLayout({
 }>) {
   const { player, isLoading } = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
 
   useEffect(() => {
     if (!isLoading && !player) {
@@ -57,13 +56,9 @@ export default function AuthenticatedAppLayout({
     );
   }
   
-  // Conditional rendering: If on an Arena path, render children directly without main sidebar/header.
-  // This allows src/app/(app)/arena/layout.tsx to define the entire Arena view.
-  if (pathname && (pathname === '/arena' || pathname.startsWith('/arena/'))) {
-    return <>{children}</>;
-  }
-  
-  // Default layout for other authenticated pages (includes sidebar and header)
+  // The main sidebar and header structure will now apply to all authenticated routes,
+  // including the initial /arena (lobby selection) view.
+  // Specific pages like ArenaPage will handle taking over the viewport for game states.
   return (
       <SidebarProvider defaultOpen={true}>
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r">
