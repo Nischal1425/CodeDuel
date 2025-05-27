@@ -3,11 +3,12 @@
 
 import type { FormEvent } from 'react';
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain } from 'lucide-react';
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon } from 'lucide-react'; // Added CoinsIcon
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
@@ -20,8 +21,11 @@ import type { Player } from '@/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ToastAction } from "@/components/ui/toast";
+
 
 const DEFAULT_LANGUAGE = "javascript";
+const COMMISSION_RATE = 0.05; // 5% commission
 
 type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingEvaluation' | 'gameOver';
 type DifficultyLobby = 'easy' | 'medium' | 'hard';
@@ -34,28 +38,34 @@ interface LobbyInfo {
   baseTime: number; // minutes
   mockPlayerCount: string;
   mockWaitTime: string;
+  entryFee: number;
 }
 
 const LOBBIES: LobbyInfo[] = [
-  { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, mockPlayerCount: "150+", mockWaitTime: "<15s" },
-  { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 10, mockPlayerCount: "80+", mockWaitTime: "<30s" },
-  { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, mockPlayerCount: "20+", mockWaitTime: "<60s" },
+  { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, mockPlayerCount: "150+", mockWaitTime: "<15s", entryFee: 50 },
+  { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 10, mockPlayerCount: "80+", mockWaitTime: "<30s", entryFee: 100 },
+  { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, mockPlayerCount: "20+", mockWaitTime: "<60s", entryFee: 200 },
 ];
 
-function LobbyCard({ lobby, onSelectLobby }: { lobby: LobbyInfo; onSelectLobby: (difficulty: DifficultyLobby) => void }) {
+function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (difficulty: DifficultyLobby) => void; disabled?: boolean; }) {
   return (
-    <Card className="hover:shadow-lg transition-shadow cursor-pointer flex flex-col">
+    <Card className={`hover:shadow-lg transition-shadow ${disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} flex flex-col`}>
       <CardHeader className="items-center text-center">
         <lobby.icon className="h-12 w-12 text-primary mb-3" />
         <CardTitle className="text-2xl">{lobby.title}</CardTitle>
         <CardDescription>{lobby.description}</CardDescription>
       </CardHeader>
-      <CardContent className="text-center space-y-1 text-sm text-muted-foreground flex-grow">
+      <CardContent className="text-center space-y-2 text-sm text-muted-foreground flex-grow">
         <p>Players: {lobby.mockPlayerCount}</p>
         <p>Est. Wait: {lobby.mockWaitTime}</p>
+        <p className="font-semibold text-primary">Entry Fee: {lobby.entryFee} <CoinsIcon className="inline h-4 w-4 text-yellow-500" /></p>
       </CardContent>
       <CardFooter>
-        <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => onSelectLobby(lobby.name)}>
+        <Button 
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" 
+            onClick={() => !disabled && onSelectLobby(lobby.name)}
+            disabled={disabled}
+        >
           Join {lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)} Lobby
         </Button>
       </CardFooter>
@@ -64,11 +74,13 @@ function LobbyCard({ lobby, onSelectLobby }: { lobby: LobbyInfo; onSelectLobby: 
 }
 
 export default function ArenaPage() {
-  const { player } = useAuth();
+  const { player, setPlayer } = useAuth(); // Added setPlayer
   const { toast } = useToast();
+  const router = useRouter();
 
   const [gameState, setGameState] = useState<GameState>('selectingLobby');
-  const [selectedLobby, setSelectedLobby] = useState<DifficultyLobby | null>(null);
+  const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
+  const [currentLobbyDetails, setCurrentLobbyDetails] = useState<LobbyInfo | null>(null);
   const [question, setQuestion] = useState<GenerateCodingChallengeOutput | null>(null);
   const [mockOpponent, setMockOpponent] = useState<Player | null>(null);
   
@@ -77,15 +89,16 @@ export default function ArenaPage() {
   
   const [code, setCode] = useState<string>('');
   const [language, setLanguage] = useState<string>(DEFAULT_LANGUAGE);
-  const [isSubmitting, setIsSubmitting] = useState(false); // General submission lock
+  const [isSubmitting, setIsSubmitting] = useState(false); 
   const [submissionResult, setSubmissionResult] = useState<EvaluateCodeSubmissionOutput | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState(0); // Controlled by GameTimer, but also held here
+  const [timeRemaining, setTimeRemaining] = useState(0); 
   const [gameOverReason, setGameOverReason] = useState<"solved" | "incorrect" | "timeup" | "error">("incorrect");
 
 
   const resetGameState = () => {
     setGameState('selectingLobby');
-    setSelectedLobby(null);
+    setSelectedLobbyName(null);
+    setCurrentLobbyDetails(null);
     setQuestion(null);
     setMockOpponent(null);
     setCode('');
@@ -96,7 +109,7 @@ export default function ArenaPage() {
     setGameOverReason("incorrect");
   };
 
-  const fetchQuestionForLobby = useCallback(async (lobbyName: DifficultyLobby) => {
+  const fetchQuestionForLobby = useCallback(async (lobbyInfo: LobbyInfo) => {
     if (!player) return;
 
     setIsLoadingQuestion(true);
@@ -104,11 +117,9 @@ export default function ArenaPage() {
     setQuestion(null);
 
     try {
-      // Pass both playerRank and selected lobby as targetDifficulty
-      const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyName });
+      const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
       setQuestion(challenge);
-      const lobbyDetails = LOBBIES.find(l => l.name === lobbyName);
-      setTimeRemaining((lobbyDetails?.baseTime || 5) * 60); 
+      setTimeRemaining(lobbyInfo.baseTime * 60); 
       setGameState('inGame');
     } catch (error) {
       console.error("Failed to generate coding challenge:", error);
@@ -118,18 +129,51 @@ export default function ArenaPage() {
         description: "Could not fetch a new coding challenge.",
         variant: "destructive",
       });
-      setGameState('selectingLobby'); // Go back to lobby selection on error
+      // Refund entry fee if question fails to load after fee deduction
+      if (player && currentLobbyDetails) {
+        const refundedPlayer = { ...player, coins: player.coins + currentLobbyDetails.entryFee };
+        setPlayer(refundedPlayer);
+        toast({ title: "Entry Fee Refunded", description: `Your ${currentLobbyDetails.entryFee} coins have been refunded.`, variant: "default" });
+      }
+      setGameState('selectingLobby'); 
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [player, toast]);
+  }, [player, toast, setPlayer, currentLobbyDetails]); // Added setPlayer & currentLobbyDetails
 
   const handleSelectLobby = (lobbyName: DifficultyLobby) => {
     if (!player) {
       toast({ title: "Error", description: "Player data not found.", variant: "destructive" });
       return;
     }
-    setSelectedLobby(lobbyName);
+    
+    const lobbyInfo = LOBBIES.find(l => l.name === lobbyName);
+    if (!lobbyInfo) {
+        toast({ title: "Error", description: "Selected lobby details not found.", variant: "destructive" });
+        return;
+    }
+
+    if (player.coins < lobbyInfo.entryFee) {
+        toast({
+            title: "Insufficient Coins",
+            description: `You need ${lobbyInfo.entryFee} coins (you have ${player.coins}).`,
+            variant: "destructive",
+            action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction>
+        });
+        return;
+    }
+
+    const updatedPlayer = { ...player, coins: player.coins - lobbyInfo.entryFee };
+    setPlayer(updatedPlayer);
+
+    toast({
+        title: "Joined Lobby!",
+        description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`,
+        className: "bg-primary text-primary-foreground"
+    });
+
+    setSelectedLobbyName(lobbyName);
+    setCurrentLobbyDetails(lobbyInfo);
     setGameState('searching');
 
     const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2);
@@ -145,8 +189,8 @@ export default function ArenaPage() {
     setTimeout(() => {
       setMockOpponent(mockOpponentDetails);
       toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
-      fetchQuestionForLobby(lobbyName);
-    }, 1500 + Math.random() * 1000); // Shorter search time
+      fetchQuestionForLobby(lobbyInfo);
+    }, 1500 + Math.random() * 1000); 
   };
   
   const handleSubmit = async (e: FormEvent) => {
@@ -155,14 +199,15 @@ export default function ArenaPage() {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
       return;
     }
-    if (!question || !question.solution || !selectedLobby) {
+    if (!question || !question.solution || !currentLobbyDetails || !player) { // Added player check
         toast({ title: "Error", description: "Game data missing. Cannot submit.", variant: "destructive" });
         return;
     }
 
     setIsSubmitting(true);
-    setGameState('submittingEvaluation'); // New state for AI evaluation
+    setGameState('submittingEvaluation'); 
     setSubmissionResult(null);
+    let evalSuccess = false;
 
     try {
       const evaluationInput = {
@@ -170,14 +215,34 @@ export default function ArenaPage() {
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
         language: language,
-        difficulty: selectedLobby,
+        difficulty: currentLobbyDetails.name,
       };
       const evaluation = await evaluateCodeSubmission(evaluationInput);
       setSubmissionResult(evaluation);
+      evalSuccess = evaluation.isPotentiallyCorrect;
 
       if (evaluation.isPotentiallyCorrect) {
         setGameOverReason("solved");
         toast({ title: "Submission Processed!", description: "AI assessed your solution as correct!", className: "bg-green-500 text-white" });
+        
+        // Handle winnings
+        const entryFee = currentLobbyDetails.entryFee;
+        const totalPot = entryFee * 2; // Mock pot from player and opponent
+        const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
+        const winningsPaidOut = totalPot - commissionAmount;
+        
+        // Player's coins were already deducted by entryFee upon joining.
+        // So, they are awarded the 'winningsPaidOut' which includes their stake back + opponent's stake (minus commission).
+        const playerAfterWin = { ...player, coins: player.coins + winningsPaidOut };
+        setPlayer(playerAfterWin);
+
+        toast({
+            title: "Victory Payout!",
+            description: `You won ${winningsPaidOut} coins! (Pot: ${totalPot}, Commission: ${commissionAmount}). New balance: ${playerAfterWin.coins}`,
+            className: "bg-accent text-accent-foreground",
+            duration: 7000,
+        });
+
       } else {
         setGameOverReason("incorrect");
         toast({ title: "Submission Processed", description: "AI assessed your solution. See feedback below.", variant: "destructive" });
@@ -185,9 +250,8 @@ export default function ArenaPage() {
     } catch (error) {
         console.error("Error during code evaluation:", error);
         toast({ title: "Evaluation Error", description: "Could not evaluate your submission. Mocking result.", variant: "destructive" });
-        // Fallback to mock evaluation if AI fails
         const mockEvalResult: EvaluateCodeSubmissionOutput = {
-            isPotentiallyCorrect: Math.random() > 0.5,
+            isPotentiallyCorrect: Math.random() > 0.5, // Mock success/failure
             correctnessExplanation: "AI evaluation failed, this is a mock result.",
             similarityToRefSolutionScore: Math.random(),
             similarityToRefSolutionExplanation: "N/A due to evaluation error.",
@@ -197,7 +261,17 @@ export default function ArenaPage() {
             overallAssessment: "Evaluation could not be completed."
         };
         setSubmissionResult(mockEvalResult);
-        setGameOverReason(mockEvalResult.isPotentiallyCorrect ? "solved" : "incorrect");
+        evalSuccess = mockEvalResult.isPotentiallyCorrect;
+        setGameOverReason(evalSuccess ? "solved" : "incorrect");
+        if (evalSuccess && player && currentLobbyDetails) { // Mock win if AI fails but mock is success
+             const entryFee = currentLobbyDetails.entryFee;
+             const totalPot = entryFee * 2;
+             const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
+             const winningsPaidOut = totalPot - commissionAmount;
+             const playerAfterWin = { ...player, coins: player.coins + winningsPaidOut };
+             setPlayer(playerAfterWin);
+             toast({ title: "Mock Payout!", description: `Mock win! ${winningsPaidOut} coins awarded.`, className: "bg-accent text-accent-foreground"});
+        }
     } finally {
       setGameState('gameOver');
       setIsSubmitting(false); 
@@ -205,6 +279,8 @@ export default function ArenaPage() {
   };
 
   const handleTimeUp = () => {
+    if (!player || !currentLobbyDetails) return; // Ensure player and lobby details are available
+
     toast({
       title: "Time's Up!",
       description: "The timer for this challenge has expired.",
@@ -238,11 +314,11 @@ export default function ArenaPage() {
           <CardHeader className="text-center">
             <Swords className="h-16 w-16 mx-auto text-primary mb-4"/>
             <CardTitle className="text-3xl font-bold">Choose Your Arena</CardTitle>
-            <CardDescription className="text-lg">Select a lobby based on your preferred difficulty and challenge.</CardDescription>
+            <CardDescription className="text-lg">Select a lobby. Entry fees apply. Current Coins: {player.coins} <CoinsIcon className="inline h-5 w-5 text-yellow-500 align-text-bottom" /></CardDescription>
           </CardHeader>
           <CardContent className="grid md:grid-cols-3 gap-6">
             {LOBBIES.map(lobby => (
-              <LobbyCard key={lobby.name} lobby={lobby} onSelectLobby={handleSelectLobby} />
+              <LobbyCard key={lobby.name} lobby={lobby} onSelectLobby={handleSelectLobby} disabled={player.coins < lobby.entryFee}/>
             ))}
           </CardContent>
         </Card>
@@ -255,7 +331,8 @@ export default function ArenaPage() {
       <div className="flex flex-col items-center justify-center h-full text-center">
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
         <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
-        <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobby}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
+        <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
+        <p className="text-sm text-muted-foreground mt-1">Entry fee: {currentLobbyDetails?.entryFee} <CoinsIcon className="inline h-3 w-3 text-yellow-500 align-baseline" /></p>
       </div>
     );
   }
@@ -273,6 +350,23 @@ export default function ArenaPage() {
   
   if (gameState === 'gameOver') {
     const resultIsSuccess = gameOverReason === "solved";
+    const entryFeePaid = currentLobbyDetails?.entryFee || 0;
+    
+    let summaryMessage = "";
+    if (gameOverReason === 'solved') {
+        const pot = entryFeePaid * 2;
+        const commission = Math.floor(pot * COMMISSION_RATE);
+        const netWinnings = pot - commission;
+        summaryMessage = `You won! ${netWinnings} coins added to your balance.`;
+    } else if (gameOverReason === 'timeup') {
+        summaryMessage = `You ran out of time. You lost ${entryFeePaid} coins.`;
+    } else if (gameOverReason === 'incorrect') {
+        summaryMessage = `AI assessed your solution as incorrect. You lost ${entryFeePaid} coins.`;
+    } else {
+        summaryMessage = `Match ended. Status: ${gameOverReason}.`;
+    }
+
+
     return (
       <div className="container mx-auto py-8">
         <Card className={`shadow-xl ${resultIsSuccess ? 'border-green-500' : 'border-destructive'}`}>
@@ -282,12 +376,10 @@ export default function ArenaPage() {
             {gameOverReason === 'timeup' && <TimerIcon className="h-16 w-16 text-yellow-500 mx-auto mb-4" />}
             
             <CardTitle className="text-3xl font-bold mb-2">
-              {gameOverReason === 'solved' ? "Victory!" : (gameOverReason === 'timeup' ? "Time's Up!" : "Defeat!")}
+              {gameOverReason === 'solved' ? "Victory!" : (gameOverReason === 'timeup' ? "Time's Up!" : "Better Luck Next Time!")}
             </CardTitle>
             <CardDescription className="text-lg text-muted-foreground">
-              {gameOverReason === 'solved' ? "The AI assessed your solution as correct!" : 
-               gameOverReason === 'timeup' ? "You ran out of time." : 
-               "The AI assessed your solution. See feedback below."}
+              {summaryMessage}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -319,6 +411,9 @@ export default function ArenaPage() {
                 </CardContent>
               </Card>
             )}
+             <div className="text-center text-muted-foreground">
+                Your coins: {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
+            </div>
             <Button onClick={resetGameState} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
              Play Again (Back to Lobbies)
             </Button>
@@ -347,7 +442,7 @@ export default function ArenaPage() {
         </div>
        );
     }
-    if (!question || !mockOpponent) {
+    if (!question || !mockOpponent || !currentLobbyDetails) { // Added currentLobbyDetails check
        return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
     }
 
@@ -359,15 +454,19 @@ export default function ArenaPage() {
               <UserSquare2 className="h-8 w-8 text-blue-500" />
               <div>
                 <p className="font-semibold text-foreground">{player.username} (You)</p>
-                <p className="text-muted-foreground">Rank: {player.rank}, Rating: {player.rating}</p>
+                <p className="text-muted-foreground">Coins: {player.coins} <CoinsIcon className="inline h-3 w-3 text-yellow-500" /> | Rank: {player.rank}</p>
               </div>
             </div>
-            <Swords className="h-6 w-6 text-muted-foreground"/>
+            <div className="text-center">
+                 <Swords className="h-6 w-6 text-muted-foreground mx-auto"/>
+                 <p className="text-xs text-primary font-medium">{currentLobbyDetails.title}</p>
+                 <p className="text-xs text-yellow-600">Wager: {currentLobbyDetails.entryFee} <CoinsIcon className="inline h-3 w-3" /></p>
+            </div>
             <div className="flex items-center gap-2">
               <UserSquare2 className="h-8 w-8 text-red-500" />
               <div>
                 <p className="font-semibold text-foreground">{mockOpponent.username}</p>
-                <p className="text-muted-foreground">Rank: {mockOpponent.rank}, Rating: {mockOpponent.rating}</p>
+                <p className="text-muted-foreground">Coins: {mockOpponent.coins} <CoinsIcon className="inline h-3 w-3 text-yellow-500" /> | Rank: {mockOpponent.rank}</p>
               </div>
             </div>
           </CardContent>
@@ -454,3 +553,6 @@ export default function ArenaPage() {
       </div>
   );
 }
+
+
+    
