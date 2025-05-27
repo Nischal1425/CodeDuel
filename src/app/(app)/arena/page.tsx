@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon } from 'lucide-react'; // Added TimerIcon
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon } from 'lucide-react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
@@ -74,7 +74,7 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
 }
 
 export default function ArenaPage() {
-  const { player, setPlayer } = useAuth(); // Added setPlayer
+  const { player, setPlayer } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
 
@@ -139,7 +139,7 @@ export default function ArenaPage() {
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [player, toast, setPlayer, currentLobbyDetails]); // Added setPlayer & currentLobbyDetails
+  }, [player, toast, setPlayer, currentLobbyDetails]);
 
   const handleSelectLobby = (lobbyName: DifficultyLobby) => {
     if (!player) {
@@ -199,7 +199,7 @@ export default function ArenaPage() {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
       return;
     }
-    if (!question || !question.solution || !currentLobbyDetails || !player) { // Added player check
+    if (!question || !question.solution || !currentLobbyDetails || !player) {
         toast({ title: "Error", description: "Game data missing. Cannot submit.", variant: "destructive" });
         return;
     }
@@ -225,14 +225,11 @@ export default function ArenaPage() {
         setGameOverReason("solved");
         toast({ title: "Submission Processed!", description: "AI assessed your solution as correct!", className: "bg-green-500 text-white" });
         
-        // Handle winnings
         const entryFee = currentLobbyDetails.entryFee;
-        const totalPot = entryFee * 2; // Mock pot from player and opponent
+        const totalPot = entryFee * 2; 
         const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
         const winningsPaidOut = totalPot - commissionAmount;
         
-        // Player's coins were already deducted by entryFee upon joining.
-        // So, they are awarded the 'winningsPaidOut' which includes their stake back + opponent's stake (minus commission).
         const playerAfterWin = { ...player, coins: player.coins + winningsPaidOut };
         setPlayer(playerAfterWin);
 
@@ -251,7 +248,7 @@ export default function ArenaPage() {
         console.error("Error during code evaluation:", error);
         toast({ title: "Evaluation Error", description: "Could not evaluate your submission. Mocking result.", variant: "destructive" });
         const mockEvalResult: EvaluateCodeSubmissionOutput = {
-            isPotentiallyCorrect: Math.random() > 0.5, // Mock success/failure
+            isPotentiallyCorrect: Math.random() > 0.5, 
             correctnessExplanation: "AI evaluation failed, this is a mock result.",
             similarityToRefSolutionScore: Math.random(),
             similarityToRefSolutionExplanation: "N/A due to evaluation error.",
@@ -263,7 +260,7 @@ export default function ArenaPage() {
         setSubmissionResult(mockEvalResult);
         evalSuccess = mockEvalResult.isPotentiallyCorrect;
         setGameOverReason(evalSuccess ? "solved" : "incorrect");
-        if (evalSuccess && player && currentLobbyDetails) { // Mock win if AI fails but mock is success
+        if (evalSuccess && player && currentLobbyDetails) { 
              const entryFee = currentLobbyDetails.entryFee;
              const totalPot = entryFee * 2;
              const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
@@ -279,7 +276,7 @@ export default function ArenaPage() {
   };
 
   const handleTimeUp = () => {
-    if (!player || !currentLobbyDetails) return; // Ensure player and lobby details are available
+    if (!player || !currentLobbyDetails) return;
 
     toast({
       title: "Time's Up!",
@@ -442,9 +439,37 @@ export default function ArenaPage() {
         </div>
        );
     }
-    if (!question || !mockOpponent || !currentLobbyDetails) { // Added currentLobbyDetails check
+    if (!question || !mockOpponent || !currentLobbyDetails) {
        return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
     }
+    
+    const codePlaceholder = `// Language: ${language}
+// Difficulty: ${question.difficulty}
+// Remember to define your main function, e.g.:
+
+function solve(params) {
+  // Your brilliant code here
+
+  // Example:
+  // const n = params.n;
+  // const m = params.m;
+  // let sumNonDivisible = 0;
+  // let sumDivisible = 0;
+  // for (let i = 1; i <= n; i++) {
+  //   if (i % m !== 0) {
+  //     sumNonDivisible += i;
+  //   } else {
+  //     sumDivisible += i;
+  //   }
+  // }
+  // return sumNonDivisible - sumDivisible;
+
+  return result;
+}
+
+// The AI will evaluate the logic within your 'solve' function
+// or the primary problem-solving part of your code.
+`;
 
     return (
       <div className="flex flex-col gap-4 h-[calc(100vh-8rem)] max-h-[calc(100vh-8rem)]">
@@ -519,7 +544,7 @@ export default function ArenaPage() {
                 <Textarea
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder={`// Start coding in ${language}...\n// Problem Difficulty: ${question.difficulty}\n// Reference solution will be in JavaScript.`}
+                placeholder={codePlaceholder}
                 className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary h-[calc(100%-100px)]"
                 disabled={isSubmitting || timeRemaining === 0}
                 />
@@ -553,8 +578,3 @@ export default function ArenaPage() {
       </div>
   );
 }
-
-
-    
-
-    
