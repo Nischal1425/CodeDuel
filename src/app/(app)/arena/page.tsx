@@ -114,6 +114,10 @@ export default function ArenaPage() {
 
   const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
   const [currentLobbyDetails, setCurrentLobbyDetails] = useState<LobbyInfo | null>(null);
+  const currentLobbyDetailsRef = useRef(currentLobbyDetails);
+  useEffect(() => { currentLobbyDetailsRef.current = currentLobbyDetails; }, [currentLobbyDetails]);
+
+
   const [question, setQuestion] = useState<GenerateCodingChallengeOutput | null>(null);
   const [mockOpponent, setMockOpponent] = useState<Player | null>(null);
   const mockOpponentRef = useRef(mockOpponent);
@@ -171,7 +175,8 @@ export default function ArenaPage() {
     setComparisonResult(null);
     setTimeRemaining(0);
     setErrorLoadingQuestion(null);
-    setGameOverReason("error");
+    // Don't reset gameOverReason here if we want to display it on a screen that uses this function to "play again"
+    // setGameOverReason("error"); 
     setShowLeaveConfirm(false);
     setLeaveConfirmType(null);
     if (opponentSubmissionTimeoutRef.current) {
@@ -179,9 +184,9 @@ export default function ArenaPage() {
       opponentSubmissionTimeoutRef.current = null;
     }
   };
-
+  
   const handleSubmissionFinalization = useCallback(async () => {
-    if (!player || !question || !currentLobbyDetails || !opponentCode) {
+    if (!player || !question || !currentLobbyDetailsRef.current || !opponentCode) {
       toast({ title: "Error", description: "Core game data missing for final comparison.", variant: "destructive" });
       setGameState('gameOver');
       setGameOverReason("error");
@@ -195,18 +200,18 @@ export default function ArenaPage() {
 
     try {
       const comparisonInput = {
-        player1Code: code || "", // Ensure code is not null
+        player1Code: code || "", 
         player2Code: opponentCode,
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
         language: language,
-        difficulty: currentLobbyDetails.name,
+        difficulty: currentLobbyDetailsRef.current.name,
       };
       const result = await compareCodeSubmissions(comparisonInput);
       setComparisonResult(result);
 
       let finalPlayer = player;
-      const entryFee = currentLobbyDetails.entryFee;
+      const entryFee = currentLobbyDetailsRef.current.entryFee;
 
       if (result.winner === 'player1') {
         setGameOverReason("comparison_player1_wins");
@@ -228,13 +233,14 @@ export default function ArenaPage() {
     } catch (error) {
       console.error("Error during code comparison:", error);
       toast({ title: "Comparison Error", description: "Could not compare submissions. Mocking draw.", variant: "destructive" });
-      setComparisonResult(null); // Or some default error comparison result
-      setGameOverReason("error"); // Or comparison_error
+      setComparisonResult(null); 
+      setGameOverReason("error"); 
     } finally {
       setIsComparing(false);
       setGameState('gameOver');
     }
-  }, [player, question, currentLobbyDetails, opponentCode, code, language, setPlayer, toast]);
+  }, [player, question, opponentCode, code, language, setPlayer, toast ]);
+
 
   const fetchQuestionForLobby = useCallback(async (lobbyInfo: LobbyInfo) => {
     if (!player || gameStateRef.current !== 'searching') {
@@ -250,7 +256,8 @@ export default function ArenaPage() {
 
     try {
       const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
-      if (gameStateRef.current !== 'searching') {
+      
+      if (gameStateRef.current !== 'searching') { // Re-check after await
            console.log("Search cancelled during question fetch.");
             if (player && lobbyInfo) { 
                 const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
@@ -260,42 +267,47 @@ export default function ArenaPage() {
            resetGameState(true);
            return;
       }
+
       setQuestion(challenge);
-      setOpponentCode(challenge.solution); // Mock opponent uses the reference solution
+      setOpponentCode(challenge.solution); 
       setTimeRemaining(lobbyInfo.baseTime * 60);
       setGameState('inGame');
 
-      // Simulate opponent submitting their code
-      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4); // Randomly between 30% and 70% of game time
+      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4); 
       opponentSubmissionTimeoutRef.current = setTimeout(() => {
         if (gameStateRef.current === 'inGame' && !opponentHasSubmittedCodeRef.current) {
           setOpponentHasSubmittedCode(true);
           toast({ title: "Opponent Alert!", description: `${mockOpponentRef.current?.username || 'Opponent'} has submitted their solution!`, className: "bg-yellow-500 text-white" });
-          // If player has also submitted, and time is left, trigger comparison
           if (playerHasSubmittedCodeRef.current && timeRemainingRef.current > 0) {
             handleSubmissionFinalization();
           }
         }
       }, opponentSubmitDelay);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to generate coding challenge:", error);
-      setErrorLoadingQuestion("Failed to load challenge. Please try again.");
-      toast({
-        title: "Error",
-        description: "Could not fetch a new coding challenge.",
-        variant: "destructive",
-      });
-      if (player && currentLobbyDetails) {
-        const refundedPlayer = { ...player, coins: player.coins + currentLobbyDetails.entryFee };
-        setPlayer(refundedPlayer);
-        toast({ title: "Entry Fee Refunded", description: `Your ${currentLobbyDetails.entryFee} coins have been refunded.`, variant: "default" });
+      let userMessage = "Failed to load challenge. Please try again.";
+      if (error.message && (error.message.includes("GoogleGenerativeAI Error") || error.message.includes("Service Unavailable") || error.message.includes("overloaded"))) {
+        userMessage = "The AI service for generating challenges is currently busy or unavailable. Please try again in a few moments.";
       }
-      resetGameState(true);
+      setErrorLoadingQuestion(userMessage);
+      toast({
+        title: "Challenge Generation Error",
+        description: userMessage,
+        variant: "destructive",
+        duration: 7000,
+      });
+
+      if (player && lobbyInfo) { // Refund entry fee
+        const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
+        setPlayer(refundedPlayer);
+        toast({ title: "Entry Fee Refunded", description: `Your ${lobbyInfo.entryFee} coins have been refunded.`, variant: "default" });
+      }
+      resetGameState(true); // Go back to lobby selection
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [player, toast, setPlayer, currentLobbyDetails, handleSubmissionFinalization]);
+  }, [player, toast, setPlayer, handleSubmissionFinalization]);
 
 
   const handleSelectLobby = (lobbyName: DifficultyLobby) => {
@@ -320,7 +332,6 @@ export default function ArenaPage() {
         return;
     }
 
-    // Deduct entry fee
     const updatedPlayer = { ...player, coins: player.coins - lobbyInfo.entryFee };
     setPlayer(updatedPlayer);
 
@@ -334,28 +345,26 @@ export default function ArenaPage() {
     setCurrentLobbyDetails(lobbyInfo);
     setGameState('searching');
 
-    // Mock opponent details
-    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); // Rank close to player
+    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); 
     const mockOpponentDetails: Player = {
       id: `bot_${Date.now()}`,
       username: `DuelBot${Math.floor(Math.random() * 1000)}`,
-      coins: Math.floor(Math.random() * 5000) + 500, // Mock coins
+      coins: Math.floor(Math.random() * 5000) + 500,
       rank: opponentRank,
-      rating: opponentRank * 75 + Math.floor(Math.random() * 100), // Mock rating
+      rating: opponentRank * 75 + Math.floor(Math.random() * 100), 
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
 
-    // Simulate finding an opponent and then fetching the question
     setTimeout(() => {
-      if (gameStateRef.current === 'searching') { // Check if still searching
+      if (gameStateRef.current === 'searching') { 
         setMockOpponent(mockOpponentDetails);
         toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
         fetchQuestionForLobby(lobbyInfo);
       } else {
-        // User might have cancelled search, refund logic is in fetchQuestionForLobby if it gets there
         console.log("Matchmaking timeout fired, but user already left 'searching' state.");
+        // Refund logic is handled if search is cancelled explicitly or if fetchQuestionForLobby detects cancellation
       }
-    }, 1500 + Math.random() * 1000); // Simulate search time
+    }, 1500 + Math.random() * 1000); 
   };
 
 
@@ -365,7 +374,7 @@ export default function ArenaPage() {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
       return;
     }
-    if (!question || !currentLobbyDetails || !player) {
+    if (!question || !currentLobbyDetailsRef.current || !player) {
         toast({ title: "Error", description: "Game data missing. Cannot submit.", variant: "destructive" });
         return;
     }
@@ -374,15 +383,13 @@ export default function ArenaPage() {
     setPlayerHasSubmittedCode(true);
     toast({title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground"});
 
-    // If opponent has already submitted, proceed to comparison
     if (opponentHasSubmittedCode) {
       handleSubmissionFinalization();
     }
-    // Else, game will wait for opponent or time up
   };
 
   const handleTimeUp = () => {
-    if (!player || !currentLobbyDetails || gameStateRef.current !== 'inGame') return;
+    if (!player || !currentLobbyDetailsRef.current || gameStateRef.current !== 'inGame') return;
 
     toast({
       title: "Time's Up!",
@@ -394,39 +401,36 @@ export default function ArenaPage() {
       setGameOverReason("timeup_both_submitted");
       handleSubmissionFinalization();
     } else if (playerHasSubmittedCode && !opponentHasSubmittedCode) {
-      // Player submitted, opponent timed out
       setGameOverReason("timeup_player1_submitted_only");
-      handleSubmissionFinalization(); // Opponent's code will be empty/null, leading to player win
+      setOpponentCode(""); // Ensure opponent code is empty for fair comparison if they didn't submit
+      handleSubmissionFinalization(); 
     } else if (!playerHasSubmittedCode && opponentHasSubmittedCode) {
-      // Opponent submitted, player timed out
       setGameOverReason("timeup_player2_submitted_only");
-      setCode(''); // Ensure player's code is considered empty for comparison
-      handleSubmissionFinalization(); // Player's code will be empty, leading to opponent win
+      setCode(''); 
+      handleSubmissionFinalization(); 
     } else {
-      // Neither submitted
       setGameOverReason("timeup_neither_submitted");
-      setGameState('gameOver'); // No comparison needed, both lose entry fee (already deducted)
+      setGameState('gameOver'); 
     }
   };
 
 
   const handleLeaveConfirm = () => {
     setShowLeaveConfirm(false);
+    const lobbyFee = currentLobbyDetailsRef.current?.entryFee || 0;
+
     if (leaveConfirmType === 'search') {
-        if (player && currentLobbyDetails) {
-            // Fee was already deducted. This toast confirms forfeiture.
-            // No refund if they cancel search after joining.
-            toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${currentLobbyDetails.entryFee} coins was forfeited.`, variant: "default" });
+        if (player) { // Fee already deducted. Forfeiture confirmed.
+             toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${lobbyFee} coins was forfeited.`, variant: "default" });
         }
         resetGameState(true); 
-        setGameOverReason("cancelledSearch"); 
+        setGameOverReason("cancelledSearch"); // Set this to prevent game over screen from showing error message
     } else if (leaveConfirmType === 'game') {
-        if (player && currentLobbyDetails) {
-             // Fee was already deducted.
-             toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${currentLobbyDetails.entryFee} coins was lost.`, variant: "destructive" });
+        if (player) { // Fee already deducted.
+             toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${lobbyFee} coins was lost.`, variant: "destructive" });
         }
         setGameOverReason("forfeit_player1");
-        setGameState('gameOver'); // This will show the game over screen with forfeit reason
+        setGameState('gameOver'); 
     }
     setLeaveConfirmType(null);
   };
@@ -437,70 +441,80 @@ export default function ArenaPage() {
   };
 
   const getCodePlaceholder = (selectedLang: SupportedLanguage): string => {
+    const difficultyText = question?.difficulty || 'N/A';
+    const lobbyNameText = currentLobbyDetailsRef.current?.name || 'N/A';
+    const problemStatementSubstr = question?.problemStatement.substring(0,50) || 'N/A';
+
     switch (selectedLang) {
       case 'javascript':
         return `// Language: JavaScript
-// Difficulty: ${question?.difficulty || 'N/A'} (Lobby: ${currentLobbyDetails?.name || 'N/A'})
-// Problem Type: ${question?.problemStatement.substring(0,50) || 'N/A'}...
+// Difficulty: ${difficultyText} (Lobby: ${lobbyNameText})
+// Problem: ${problemStatementSubstr}...
 
 function solve(params) {
   // Your brilliant JavaScript code here!
-  // Example: const n = params.n;
+  // Example: const n = params; // if input is a single value
+  // Example: const { data_array, target_value } = params; // if input is an object
   // let result = 0;
   /* ... your logic ... */
   return result;
 }
 
-// The AI will evaluate the logic within your 'solve' function
-// or the primary problem-solving part of your JavaScript code.
+// Ensure your 'solve' function can handle various input types based on the problem.
+// For complex inputs (objects/arrays), 'params' will be the parsed JSON from test cases.
+// For simple inputs (numbers/strings), 'params' will be the direct value.
 `;
       case 'python':
         return `# Language: Python
-# Difficulty: ${question?.difficulty || 'N/A'} (Lobby: ${currentLobbyDetails?.name || 'N/A'})
-# Problem Type: ${question?.problemStatement.substring(0,50) || 'N/A'}...
+# Difficulty: ${difficultyText} (Lobby: ${lobbyNameText})
+# Problem: ${problemStatementSubstr}...
 
 def solve(params):
   # Your brilliant Python code here!
-  # Example: n = params.get('n') if isinstance(params, dict) else params
+  # Example: n = params # if input is a single value
+  # Example: data_array = params.get('data_array') # if input is a dictionary (parsed from JSON)
   # result = 0
   # ... your logic ...
   return result
 
-# The AI will evaluate the logic within your 'solve' function
-# or the primary problem-solving part of your Python code.
+# Ensure your 'solve' function can handle various input types.
+# For complex inputs (objects/arrays from JSON), 'params' will be a Python dict or list.
+# For simple inputs, 'params' will be the direct value.
 `;
       case 'cpp':
         return `// Language: C++
-// Difficulty: ${question?.difficulty || 'N/A'} (Lobby: ${currentLobbyDetails?.name || 'N/A'})
-// Problem Type: ${question?.problemStatement.substring(0,50) || 'N/A'}...
+// Difficulty: ${difficultyText} (Lobby: ${lobbyNameText})
+// Problem: ${problemStatementSubstr}...
 
 #include <iostream>
 #include <vector>
-// Add other necessary headers like <string>, <nlohmann/json.hpp> if using JSON
+#include <string>
+// Add other necessary headers.
+// If using JSON, you might need a library like nlohmann/json.hpp (not included in this basic setup).
 
-// You might need to parse 'params' if it's a JSON string,
-// or adjust function signature based on problem.
-// The AI will look for the main problem-solving logic.
+// The AI will look for a main problem-solving function or logic.
+// For simple competitive programming, you might read from std::cin in main.
+// For evaluation in this system, try to encapsulate logic in a callable form if possible,
+// though the AI will analyze the provided C++ code block.
 
-// Example signature if params is a simple type or you parse it in main:
-// auto solve(/* appropriate C++ type for params */) {
+// Example (conceptual, actual signature depends on problem):
+// auto solve(/* appropriate C++ type for params, or parse from string */) {
 //    // ... your logic ...
 //    return result;
 // }
 
 int main() {
-  // For competitive programming style, read from std::cin
-  // For Genkit evaluation, the 'solve' function or equivalent logic will be assessed.
-  // Example:
-  // int n;
-  // std::cin >> n;
-  // auto result = solve(n);
-  // std::cout << result << std::endl;
+  // Example: Read input, call solve, print output
+  // std::string input_str;
+  // std::getline(std::cin, input_str); 
+  // // Parse input_str if needed, then call your solution logic
+  // // auto result = solve(parsed_input);
+  // // std::cout << result << std::endl;
   return 0;
 }
 
-// The AI will evaluate your primary C++ problem-solving logic,
-// typically looking for a main function or a clearly defined solution function.
+// The AI will evaluate your primary C++ problem-solving logic.
+// For test cases, ensure your main() or a similar entry point handles I/O as expected by the problem.
 `;
       default:
         return "// Select a language to see a placeholder.";
@@ -522,11 +536,9 @@ int main() {
 
         if (language === 'javascript') {
             try {
-                // Dynamically create the function from the player's code string
                 const playerFunctionFactory = new Function(`
                     "use strict";
                     ${code}
-                    // Ensure 'solve' (or the main function name) is defined globally or returned
                     if (typeof solve !== 'function') {
                         throw new Error('The "solve" function is not defined in your code.');
                     }
@@ -538,45 +550,36 @@ int main() {
                      throw new Error('The "solve" function is not defined or not a function in your code.');
                 }
 
-                // Parse input if it's JSON, otherwise use as string
                 let parsedInput = tc.input;
                 try {
-                    // Basic check for JSON structure, might need refinement
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
                     }
-                    // Add more robust parsing or type checking based on problem spec if possible
                 } catch (e) {
                     // Input is not JSON or invalid JSON, use as string
-                    // console.warn("Test case input is not valid JSON, using as string:", tc.input);
                 }
                 
                 let outputFromSolve;
                 try {
                     outputFromSolve = playerSolveFunction(parsedInput);
                 } catch (solveError: any) {
-                    // This error is from within the player's solve function execution
                     throw new Error(`Error in your solve function: ${solveError.message || String(solveError)}`);
                 }
                 
-                // Stringify output for comparison if it's an object/array
                 actualOutput = typeof outputFromSolve === 'object' ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
 
-                // Normalize expected output for comparison if it's a stringified object/array
                 let normalizedExpectedOutput = tc.expectedOutput;
                  try {
-                    // Attempt to parse and re-stringify to normalize JSON strings (e.g., whitespace differences)
                     const parsedExpected = JSON.parse(tc.expectedOutput);
                     normalizedExpectedOutput = JSON.stringify(parsedExpected);
                 } catch (e) { /* not json, use as is */ }
 
                 status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
 
-            } catch (error: any) { // Catch errors from new Function, parsing, or the re-thrown solveError
+            } catch (error: any) { 
                 status = 'error';
                 actualOutput = "Error during execution";
                 errorMessage = error.message || String(error);
-                console.error(`Error executing test case ${tc.name}:`, error, error.stack); // Log full stack for debugging
             }
         } else {
             status = 'client_unsupported';
@@ -590,8 +593,8 @@ int main() {
             actualOutput,
             status,
             errorMessage,
-            timeTaken: "N/A", // Mocked
-            memoryUsed: "N/A", // Mocked
+            timeTaken: "N/A", 
+            memoryUsed: "N/A", 
         });
     }
     setTestResults(results);
@@ -600,16 +603,13 @@ int main() {
 
 
   useEffect(() => {
-    // If player data is lost or becomes null while not in lobby selection, reset.
     if (!player && gameState !== 'selectingLobby') {
-        // Consider if a toast message is needed here.
-        // For now, just reset to avoid broken states.
         resetGameState(true);
     }
-  }, [player, gameState]); // Removed resetGameState from deps as it's stable
+  }, [player, gameState]); 
 
 
-  if (!player) { // Should be handled by layout, but good for direct page access defense
+  if (!player) { 
      return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -633,6 +633,7 @@ int main() {
             ))}
           </CardContent>
         </Card>
+        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
       </div>
     );
   }
@@ -643,10 +644,11 @@ int main() {
         <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
         <h2 className="text-2xl font-semibold text-foreground mb-2">Finding Your Opponent...</h2>
         <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby for players around <span className="font-medium text-primary">Rank {player.rank}</span>.</p>
-        <p className="text-sm text-muted-foreground mt-1">Entry fee: {currentLobbyDetails?.entryFee} <CoinsIcon className="inline h-3 w-3 text-yellow-500 align-baseline" /></p>
+        <p className="text-sm text-muted-foreground mt-1">Entry fee: {currentLobbyDetailsRef.current?.entryFee} <CoinsIcon className="inline h-3 w-3 text-yellow-500 align-baseline" /></p>
         <Button variant="outline" onClick={() => triggerLeave('search')} className="mt-6">
             <LogOut className="mr-2 h-4 w-4" /> Cancel Search & Leave Lobby
         </Button>
+        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
       </div>
     );
   }
@@ -663,12 +665,11 @@ int main() {
   }
 
   if (gameState === 'gameOver') {
-    const entryFeePaid = currentLobbyDetails?.entryFee || 0;
+    const entryFeePaid = currentLobbyDetailsRef.current?.entryFee || 0;
     let title = "Match Over";
     let message = "";
     let icon: React.ReactNode = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
 
-    // Determine title, message, and icon based on gameOverReason and comparisonResult
     switch(gameOverReason) {
         case "comparison_player1_wins":
             title = "Victory!";
@@ -688,20 +689,20 @@ int main() {
             message = `The duel ended in a draw. Your entry fee of ${entryFeePaid} coins was consumed.`;
             icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case "timeup_player1_submitted_only": // Player submitted, opponent timed out
-            title = comparisonResult?.winner === 'player1' ? "Victory by Default!" : "Close Call!"; // Should always be player1 win if opponent code is empty
+        case "timeup_player1_submitted_only": 
+            title = comparisonResult?.winner === 'player1' ? "Victory by Default!" : "Close Call!";
              const p1TimeoutWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
             message = comparisonResult?.winner === 'player1' 
                 ? `Your opponent timed out after you submitted! You won ${p1TimeoutWinnings} coins.`
-                : `Your opponent timed out. The match was considered a draw. You lost ${entryFeePaid} coins.`; // Fallback if comparison logic changes
+                : `Your opponent timed out. The match was considered a draw as your code was compared to an empty submission. You lost ${entryFeePaid} coins.`; 
             icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case "timeup_player2_submitted_only": // Opponent submitted, player timed out
+        case "timeup_player2_submitted_only": 
             title = "Defeat by Timeout";
             message = `You ran out of time after your opponent submitted. You lost ${entryFeePaid} coins.`;
             icon = <TimerIcon className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
-        case "timeup_both_submitted": // Both submitted but time ran out during comparison or before
+        case "timeup_both_submitted": 
              title = comparisonResult?.winner === 'player1' ? "Last Second Victory!" : (comparisonResult?.winner === 'player2' ? "Defeat at the Buzzer!" : "Draw at Timeout!");
              const bothSubmittedWinnings = (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE);
              message = comparisonResult?.winner === 'player1' 
@@ -719,15 +720,15 @@ int main() {
             message = `You forfeited the match and lost ${entryFeePaid} coins.`;
             icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
             break;
-        case "cancelledSearch": // This typically won't show a full game over screen but reset. For completeness:
+        case "cancelledSearch": 
             title = "Search Cancelled";
             message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`;
-            // icon (could be LogOut or similar)
+            icon = <LogOut className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
             break;
         case "error":
         default:
             title = "Match Error";
-            message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins was lost.`;
+            message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins may have been lost. Please check your balance.`;
             icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
     }
@@ -789,11 +790,12 @@ int main() {
             <div className="text-center text-muted-foreground">
                 Your coins: {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
             </div>
-            <Button onClick={() => resetGameState(true)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+            <Button onClick={() => { resetGameState(true); setGameOverReason("error"); /* Reset reason for next game */ }} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
              Play Again (Back to Lobbies)
             </Button>
           </CardContent>
         </Card>
+        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
       </div>
     );
   }
@@ -814,16 +816,16 @@ int main() {
             <AlertTriangle className="h-12 w-12 text-destructive mb-4" />
             <p className="text-xl text-destructive mb-2">{errorLoadingQuestion}</p>
             <Button onClick={() => resetGameState(true)}>Back to Lobbies</Button>
+            <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
         </div>
        );
     }
-    if (!question || !mockOpponent || !currentLobbyDetails) { // Ensure all critical data is loaded
+    if (!question || !mockOpponent || !currentLobbyDetailsRef.current) { 
        return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
     }
 
     return (
-      <div className="flex flex-col gap-4 h-full p-4 md:p-6"> {/* Main page container */}
-        {/* Top Bar: Player vs Opponent Info */}
+      <div className="flex flex-col gap-4 h-full p-4 md:p-6">
         <Card className="shadow-md shrink-0">
           <CardContent className="p-3 flex justify-around items-center text-sm">
             <div className="flex items-center gap-2">
@@ -835,8 +837,8 @@ int main() {
             </div>
             <div className="text-center">
                  <Swords className="h-6 w-6 text-muted-foreground mx-auto"/>
-                 <p className="text-xs text-primary font-medium">{currentLobbyDetails.title}</p>
-                 <p className="text-xs text-yellow-600">Wager: {currentLobbyDetails.entryFee} <CoinsIcon className="inline h-3 w-3" /></p>
+                 <p className="text-xs text-primary font-medium">{currentLobbyDetailsRef.current.title}</p>
+                 <p className="text-xs text-yellow-600">Wager: {currentLobbyDetailsRef.current.entryFee} <CoinsIcon className="inline h-3 w-3" /></p>
             </div>
             <div className="flex items-center gap-2">
               <UserSquare2 className="h-8 w-8 text-red-500" />
@@ -848,22 +850,19 @@ int main() {
           </CardContent>
         </Card>
 
-        {/* Main Content: Problem Display and Code Editor */}
-        <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0"> {/* Use min-h-0 for flex children to scroll */}
-            {/* Left Panel: Problem Statement */}
+        <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0"> 
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-              <CardHeader className="bg-card-foreground/5"> {/* Subtle bg for header */}
+              <CardHeader className="bg-card-foreground/5"> 
                   <div className="flex justify-between items-center">
                       <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
                       <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
                   </div>
               </CardHeader>
-              <CardContent className="p-0 flex-grow overflow-y-auto"> {/* Allow content to scroll */}
+              <CardContent className="p-0 flex-grow overflow-y-auto"> 
                   <ProblemDisplay question={question} />
               </CardContent>
             </Card>
 
-            {/* Right Panel: Code Editor & Actions */}
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
               <CardHeader className="bg-card-foreground/5">
                   <div className="flex justify-between items-center">
@@ -899,7 +898,7 @@ int main() {
                     <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>
                   )}
               </CardHeader>
-              <CardContent className="flex-grow p-4 flex flex-col min-h-0"> {/* Allow content to scroll, min-h-0 */}
+              <CardContent className="flex-grow p-4 flex flex-col min-h-0"> 
                   <Textarea
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
@@ -908,7 +907,6 @@ int main() {
                     disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}
                   />
               </CardContent>
-              {/* Test Cases Accordion */}
               <Accordion type="single" collapsible className="w-full px-4 pb-2">
                 <AccordionItem value="test-cases">
                     <AccordionTrigger className="text-md hover:no-underline py-2">
@@ -917,7 +915,7 @@ int main() {
                     <AccordionContent className="space-y-3 pt-2">
                         {question.testCases && question.testCases.length > 0 ? (
                             <>
-                                <div className="max-h-48 overflow-y-auto pr-2"> {/* Scrollable test case list */}
+                                <div className="max-h-48 overflow-y-auto pr-2"> 
                                     <Table>
                                         <TableHeader>
                                             <TableRow>
@@ -947,7 +945,7 @@ int main() {
                                   </div>
                                 )}
                                 {testResults.length > 0 && (
-                                    <ScrollArea className="mt-2 max-h-48"> {/* Scrollable test results */}
+                                    <ScrollArea className="mt-2 max-h-48"> 
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
@@ -985,8 +983,7 @@ int main() {
                     </AccordionContent>
                 </AccordionItem>
               </Accordion>
-              {/* Action Buttons */}
-              <div className="p-4 border-t flex flex-col gap-2"> {/* Footer actions */}
+              <div className="p-4 border-t flex flex-col gap-2"> 
                   <Button
                     onClick={handleSubmitCode}
                     disabled={isComparing || playerHasSubmittedCode || !code.trim() || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'}
@@ -1004,6 +1001,7 @@ int main() {
               </div>
             </Card>
         </div>
+        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
       </div>
     );
   }
@@ -1011,8 +1009,9 @@ int main() {
   // Fallback for unexpected game states
   return (
       <div className="flex flex-col items-center justify-center h-full p-4">
-        <p className="mb-4">An unexpected state has occurred.</p>
+        <p className="mb-4">An unexpected state has occurred. Current state: {gameState}</p>
         <Button onClick={() => resetGameState(true)}>Return to Lobby Selection</Button>
+        <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={leaveConfirmType}/>
       </div>
   );
 }
@@ -1046,7 +1045,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
 
     
