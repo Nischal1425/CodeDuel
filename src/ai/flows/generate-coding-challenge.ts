@@ -46,13 +46,16 @@ const prompt = ai.definePrompt({
   output: {schema: GenerateCodingChallengeOutputSchema},
   prompt: `You are an expert coding challenge generator. You will generate a unique coding problem tailored to the player's skill level and the target difficulty.
 The difficulty of the problem must align with the player's rank and the specified target difficulty: a higher rank should correspond to a harder problem within the target difficulty tier.
-The coding problem must be very challenging and well suited for a 1v1 coding battle. The solution MUST be in JavaScript.
+
+The coding problem must be very challenging and well suited for a 1v1 coding battle.
+The solution MUST be in JavaScript.
+**The problem should be inspired by real-world scenarios, case studies, or challenges one might encounter in innovative tech environments, similar to those at leading technology companies. Focus on practical application and creative problem-solving.**
 
 Player Rank: {{{playerRank}}}
 Target Difficulty: {{{targetDifficulty}}}
 
 Generate a coding problem with the following specifications:
-- problemStatement: A clear and concise description of the coding problem. Include detailed input and output specifications, constraints, and at least one clear example with input and expected output.
+- problemStatement: A clear and concise description of the coding problem. Include detailed input and output specifications, constraints, and at least one clear example with input and expected output. The problem statement should be engaging and contextualized if possible (e.g., "Tesla's self-driving AI needs to optimize a route..." or "Google's search algorithm needs a faster way to index...").
 - difficulty: The difficulty level of the problem (must be exactly 'easy', 'medium', or 'hard', matching the targetDifficulty).
 - solution: A reference solution code for the problem, written in JavaScript. The solution should be functionally correct and reasonably efficient for the stated difficulty.
 
@@ -102,3 +105,4 @@ const generateCodingChallengeFlow = ai.defineFlow(
     return output!;
   }
 );
+
