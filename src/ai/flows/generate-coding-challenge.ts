@@ -38,7 +38,7 @@ const GenerateCodingChallengeOutputSchema = z.object({
   difficulty: z.enum(['easy', 'medium', 'hard']).describe('The difficulty level of the problem, matching the targetDifficulty.'),
   solution: z.string().describe('The reference solution code for the problem, primarily in JavaScript. This solution function MUST be named `solve` and accept a single argument `params`. If the problem has multiple conceptual inputs (e.g. `nums`, `target`), `params` will be an object like `{ "nums": ..., "target": ...}`. If it has a single primitive input, `params` will be that primitive.'),
   testCases: z.array(TestCaseSchema).min(2).max(4).describe("An array of 2 to 4 public test cases. Each test case should include a name, string input (JSON string for complex inputs with named parameters, or primitive string for simple inputs), string expectedOutput (JSON string for complex outputs, or primitive string for simple outputs), and isPublic flag."),
-  functionSignature: z.string().optional().describe("A string representing the primary function signature the player should ideally implement, e.g., 'function twoSum(nums, target)' or 'def get_average(scores):'. This helps in setting up the code editor placeholder. This signature should align with the conceptual inputs described in problemStatement and used in testCases."),
+  functionSignature: z.string().optional().describe("A string representing the primary function signature the player should implement. Examples: for JS: 'function twoSum(nums, target)', for Python: 'def get_average(scores):', for C++: 'std::vector<int> twoSum(std::vector<int>& nums, int target)'. For C++, this signature will typically be placed inside a 'class Solution { public: ... };' structure by the placeholder generator. This signature should align with the conceptual inputs described in problemStatement and used in testCases."),
 });
 export type GenerateCodingChallengeOutput = z.infer<
   typeof GenerateCodingChallengeOutputSchema
@@ -76,10 +76,15 @@ Generate a coding problem with the following specifications:
     - Each testCase needs a 'name'.
     - 'input': Input for the test case.
         - If the problem has multiple conceptual parameters (e.g., \`nums\` and \`target\`), this MUST be a JSON STRING representing an object mapping these parameter names to their values. Example: For inputs \`nums = [1,2,3]\` and \`k = 2\`, the input string should be \`'{"nums": [1,2,3], "k": 2}'\`.
-        - If the problem has a single primitive input (e.g., \`5\` or \`"hello"\`), this should be a plain string representation of that primitive. Example: for input \`5\`, the string should be \`'5'\`. For input \`"hello"\`, the string should be \`'"hello"'\` (including the quotes if it's a string literal).
+        - If the problem has a single primitive input (e.g., \`5\` or \`"hello"\`), this should be a plain string representation of that primitive. Example: for input \`5\`, the string should be \`'5'\`. For input \`"hello"\` that is meant as a string literal, the string should be \`'"hello"'\` (including the quotes if it's a string literal).
     - 'expectedOutput': Expected output. If complex, provide as a JSON STRING. If simple, provide as a plain string. Example: for output \`[3,4]\`, the string should be \`'[3,4]'\`. For output \`10\`, the string should be \`'10'\`.
     - 'isPublic': Must be true.
-- functionSignature: (Optional but highly recommended) A string representing the primary function signature the player should ideally implement for the problem. For example, if the problem is "Two Sum", this could be 'function twoSum(nums, target)'. This signature should align with the conceptual inputs defined in the problem statement and the structure of the 'input' field in testCases. The name and parameters should be descriptive.
+- functionSignature: (Highly recommended) A string representing the primary function signature the player should implement.
+    Examples:
+    - For JavaScript: 'function twoSum(nums, target)'
+    - For Python: 'def get_average(scores):'
+    - For C++: 'std::vector<int> twoSum(std::vector<int>& nums, int target)'
+    This signature should align with the conceptual inputs defined in the problem statement and the structure of the 'input' field in testCases. The name and parameters should be descriptive. For C++, assume this signature will be placed within a 'class Solution { public: ... };' structure by the application code editor placeholder.
 
 Ensure the problem includes obfuscation (logic twist, variable rename, disguised context) to make it AI-resistant but still solvable by a human.
 The problem statement should be comprehensive enough for a developer to understand and solve the problem without ambiguity.
@@ -137,3 +142,4 @@ const generateCodingChallengeFlow = ai.defineFlow(
     return output!;
   }
 );
+
