@@ -8,12 +8,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut } from 'lucide-react';
-import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'; // Removed AlertDialogTrigger as it's part of page now
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info } from 'lucide-react'; // Added PlaySquare, Info
+import type { GenerateCodingChallengeOutput, TestCase } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
-import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
-import { evaluateCodeSubmission } from '@/ai/flows/evaluate-code-submission';
+import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions'; // Updated import
+import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions'; // Updated import
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { GameTimer } from './_components/GameTimer';
@@ -23,14 +23,28 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ToastAction } from "@/components/ui/toast";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 
 
 const DEFAULT_LANGUAGE = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
 
-type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingEvaluation' | 'gameOver';
+type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingComparison' | 'gameOver'; // Renamed submittingEvaluation to submittingComparison
 type DifficultyLobby = 'easy' | 'medium' | 'hard';
-type GameOverReason = "solved" | "incorrect" | "timeup" | "error" | "forfeit" | "cancelledSearch";
+type SupportedLanguage = "javascript" | "python" | "cpp";
+
+type GameOverReason =
+  | "comparison_player1_wins"
+  | "comparison_player2_wins"
+  | "comparison_draw"
+  | "timeup_player1_submitted_only" // Player 1 submitted, P2 timed out
+  | "timeup_player2_submitted_only" // Player 2 submitted, P1 timed out
+  | "timeup_both_submitted" // Both submitted by timeout, go to comparison
+  | "timeup_neither_submitted"
+  | "forfeit_player1"
+  | "error"
+  | "cancelledSearch";
 
 
 interface LobbyInfo {
@@ -50,6 +64,18 @@ const LOBBIES: LobbyInfo[] = [
   { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, mockPlayerCount: "20+", mockWaitTime: "<60s", entryFee: 200 },
 ];
 
+interface TestResult {
+  testCaseName: string;
+  input: string;
+  expectedOutput: string;
+  actualOutput: string;
+  status: 'pass' | 'fail' | 'error' | 'not_run' | 'client_unsupported';
+  errorMessage?: string;
+  timeTaken?: string; // mock
+  memoryUsed?: string; // mock
+}
+
+
 function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (difficulty: DifficultyLobby) => void; disabled?: boolean; }) {
   return (
     <Card className={`hover:shadow-lg transition-shadow ${disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} flex flex-col`}>
@@ -64,8 +90,8 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
         <p className="font-semibold text-primary">Entry Fee: {lobby.entryFee} <CoinsIcon className="inline h-4 w-4 text-yellow-500" /></p>
       </CardContent>
       <CardFooter>
-        <Button 
-            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" 
+        <Button
+            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
             onClick={() => !disabled && onSelectLobby(lobby.name)}
             disabled={disabled}
         >
@@ -82,27 +108,38 @@ export default function ArenaPage() {
   const router = useRouter();
 
   const [gameState, setGameState] = useState<GameState>('selectingLobby');
-  const gameStateRef = useRef(gameState); // Ref to track gameState for timeouts
+  const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
-
 
   const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
   const [currentLobbyDetails, setCurrentLobbyDetails] = useState<LobbyInfo | null>(null);
   const [question, setQuestion] = useState<GenerateCodingChallengeOutput | null>(null);
   const [mockOpponent, setMockOpponent] = useState<Player | null>(null);
-  
+
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
   const [errorLoadingQuestion, setErrorLoadingQuestion] = useState<string | null>(null);
-  
+
   const [code, setCode] = useState<string>('');
-  const [language, setLanguage] = useState<string>(DEFAULT_LANGUAGE);
-  const [isSubmittingCode, setIsSubmittingCode] = useState(false); 
-  const [submissionResult, setSubmissionResult] = useState<EvaluateCodeSubmissionOutput | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState(0); 
-  const [gameOverReason, setGameOverReason] = useState<GameOverReason>("incorrect");
+  const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE);
+  const [isTestingCode, setIsTestingCode] = useState(false);
+  const [testResults, setTestResults] = useState<TestResult[]>([]);
+
+  const [playerHasSubmittedCode, setPlayerHasSubmittedCode] = useState(false);
+  const [opponentHasSubmittedCode, setOpponentHasSubmittedCode] = useState(false);
+  const [opponentCode, setOpponentCode] = useState<string | null>(null); // Will store question.solution
+  const [isComparing, setIsComparing] = useState(false);
+  const [comparisonResult, setComparisonResult] = useState<CompareCodeSubmissionsOutput | null>(null);
+
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const timeRemainingRef = useRef(timeRemaining);
+  useEffect(() => { timeRemainingRef.current = timeRemaining; }, [timeRemaining]);
+
+  const [gameOverReason, setGameOverReason] = useState<GameOverReason>("error");
 
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leaveConfirmType, setLeaveConfirmType] = useState<'search' | 'game' | null>(null);
+
+  const opponentSubmissionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
 
   const resetGameState = (backToLobbySelection = true) => {
@@ -114,17 +151,27 @@ export default function ArenaPage() {
     setQuestion(null);
     setMockOpponent(null);
     setCode('');
-    setSubmissionResult(null);
-    setIsSubmittingCode(false);
+    setLanguage(DEFAULT_LANGUAGE);
+    setIsTestingCode(false);
+    setTestResults([]);
+    setPlayerHasSubmittedCode(false);
+    setOpponentHasSubmittedCode(false);
+    setOpponentCode(null);
+    setIsComparing(false);
+    setComparisonResult(null);
     setTimeRemaining(0);
     setErrorLoadingQuestion(null);
-    setGameOverReason("incorrect");
+    setGameOverReason("error"); // Default reason
     setShowLeaveConfirm(false);
     setLeaveConfirmType(null);
+    if (opponentSubmissionTimeoutRef.current) {
+      clearTimeout(opponentSubmissionTimeoutRef.current);
+      opponentSubmissionTimeoutRef.current = null;
+    }
   };
 
   const fetchQuestionForLobby = useCallback(async (lobbyInfo: LobbyInfo) => {
-    if (!player || gameStateRef.current !== 'searching') { // Check ref here
+    if (!player || gameStateRef.current !== 'searching') {
         if (gameStateRef.current !== 'searching') {
             console.log("Search cancelled, not fetching question.");
         }
@@ -136,21 +183,37 @@ export default function ArenaPage() {
     setQuestion(null);
 
     try {
+      // Language parameter is not passed to generateCodingChallenge yet, it generates JS based challenges.
+      // The problem statement should be language-agnostic.
       const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
-      if (gameStateRef.current !== 'searching') { // Double check after await
+      if (gameStateRef.current !== 'searching') {
            console.log("Search cancelled during question fetch.");
-           // Potentially refund fee if it was already deducted and user cancelled before question load
             if (player && lobbyInfo) {
                 const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
                 setPlayer(refundedPlayer);
                 toast({ title: "Search Cancelled", description: `Entry fee of ${lobbyInfo.entryFee} coins refunded.`, variant: "default" });
             }
-           resetGameState(true); // Go back to lobby selection
+           resetGameState(true);
            return;
       }
       setQuestion(challenge);
-      setTimeRemaining(lobbyInfo.baseTime * 60); 
+      setOpponentCode(challenge.solution); // Mock opponent uses the reference solution
+      setTimeRemaining(lobbyInfo.baseTime * 60);
       setGameState('inGame');
+
+      // Simulate opponent submission
+      const opponentSubmitDelay = (lobbyInfo.baseTime * 60 * 1000) * (0.3 + Math.random() * 0.4); // 30-70% of game time
+      opponentSubmissionTimeoutRef.current = setTimeout(() => {
+        if (gameStateRef.current === 'inGame' && !opponentHasSubmittedCode) { // Check if game still active and opponent hasn't submitted
+          setOpponentHasSubmittedCode(true);
+          toast({ title: "Opponent Alert!", description: `${mockOpponent?.username || 'Opponent'} has submitted their solution!`, className: "bg-yellow-500 text-white" });
+          // If player has also submitted, trigger comparison
+          if (playerHasSubmittedCode && timeRemainingRef.current > 0) { // Ensure time hasn't run out
+            handleSubmissionFinalization();
+          }
+        }
+      }, opponentSubmitDelay);
+
     } catch (error) {
       console.error("Failed to generate coding challenge:", error);
       setErrorLoadingQuestion("Failed to load challenge. Please try again.");
@@ -164,18 +227,19 @@ export default function ArenaPage() {
         setPlayer(refundedPlayer);
         toast({ title: "Entry Fee Refunded", description: `Your ${currentLobbyDetails.entryFee} coins have been refunded.`, variant: "default" });
       }
-      setGameState('selectingLobby'); 
+      resetGameState(true);
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [player, toast, setPlayer, currentLobbyDetails]);
+  }, [player, toast, setPlayer, currentLobbyDetails, opponentHasSubmittedCode, playerHasSubmittedCode, mockOpponent?.username]);
+
 
   const handleSelectLobby = (lobbyName: DifficultyLobby) => {
     if (!player) {
       toast({ title: "Error", description: "Player data not found.", variant: "destructive" });
       return;
     }
-    
+
     const lobbyInfo = LOBBIES.find(l => l.name === lobbyName);
     if (!lobbyInfo) {
         toast({ title: "Error", description: "Selected lobby details not found.", variant: "destructive" });
@@ -214,131 +278,146 @@ export default function ArenaPage() {
       rating: opponentRank * 75 + Math.floor(Math.random() * 100),
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
-    
-    // Ensure fetchQuestionForLobby is only called if still in 'searching' state
+
     setTimeout(() => {
-      if (gameStateRef.current === 'searching') { // Use ref here
+      if (gameStateRef.current === 'searching') {
         setMockOpponent(mockOpponentDetails);
         toast({ title: "Opponent Found!", description: `Matched with ${mockOpponentDetails.username} (Rank ${mockOpponentDetails.rank})`, className: "bg-green-500 text-white"});
         fetchQuestionForLobby(lobbyInfo);
       } else {
         console.log("Matchmaking timeout fired, but user already left 'searching' state.");
       }
-    }, 1500 + Math.random() * 1000); 
+    }, 1500 + Math.random() * 1000);
   };
-  
-  const handleSubmitCode = async (e: FormEvent) => {
-    e.preventDefault();
+
+  const handleSubmissionFinalization = useCallback(async () => {
+    if (!player || !question || !currentLobbyDetails || !opponentCode) {
+      toast({ title: "Error", description: "Core game data missing for final comparison.", variant: "destructive" });
+      setGameState('gameOver');
+      setGameOverReason("error");
+      return;
+    }
+    if (gameStateRef.current === 'submittingComparison' || gameStateRef.current === 'gameOver') return; // Already processing or ended
+
+    setGameState('submittingComparison');
+    setIsComparing(true);
+    setComparisonResult(null);
+
+    try {
+      const comparisonInput = {
+        player1Code: code,
+        player2Code: opponentCode, // This is the question.solution
+        referenceSolution: question.solution,
+        problemStatement: question.problemStatement,
+        language: language, // Player's chosen language
+        difficulty: currentLobbyDetails.name,
+      };
+      const result = await compareCodeSubmissions(comparisonInput);
+      setComparisonResult(result);
+
+      let finalPlayer = player;
+      const entryFee = currentLobbyDetails.entryFee;
+
+      if (result.winner === 'player1') {
+        setGameOverReason("comparison_player1_wins");
+        const totalPot = entryFee * 2;
+        const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
+        const winningsPaidOut = totalPot - commissionAmount;
+        finalPlayer = { ...player, coins: player.coins + winningsPaidOut };
+        setPlayer(finalPlayer);
+        toast({ title: "Victory!", description: `You won the duel! ${winningsPaidOut} coins awarded.`, className: "bg-green-500 text-white", duration: 7000 });
+      } else if (result.winner === 'player2') {
+        setGameOverReason("comparison_player2_wins");
+        // Entry fee already deducted, no change to player coins
+        toast({ title: "Defeat", description: "Your opponent's solution was deemed superior.", variant: "destructive", duration: 7000 });
+      } else { // Draw
+        setGameOverReason("comparison_draw");
+        // Entry fee already deducted, no change to player coins
+        toast({ title: "Draw!", description: "The duel ended in a draw. Your entry fee was consumed.", variant: "default", duration: 7000 });
+      }
+    } catch (error) {
+      console.error("Error during code comparison:", error);
+      toast({ title: "Comparison Error", description: "Could not compare submissions. Mocking draw.", variant: "destructive" });
+      setComparisonResult(null); // Or a mock result if desired
+      setGameOverReason("error"); // Or specific error reason
+      // No coin change on error, fee was already deducted
+    } finally {
+      setIsComparing(false);
+      setGameState('gameOver');
+    }
+  }, [player, question, currentLobbyDetails, opponentCode, code, language, setPlayer, toast]);
+
+
+  const handleSubmitCode = async (e?: FormEvent) => { // Make e optional for programmatic calls
+    e?.preventDefault();
     if (!code.trim()) {
       toast({ title: "Empty Code", description: "Please write some code before submitting.", variant: "destructive" });
       return;
     }
-    if (!question || !question.solution || !currentLobbyDetails || !player) {
+    if (!question || !currentLobbyDetails || !player) {
         toast({ title: "Error", description: "Game data missing. Cannot submit.", variant: "destructive" });
         return;
     }
+    if (playerHasSubmittedCode || gameStateRef.current !== 'inGame') return; // Prevent re-submission or submission outside game
 
-    setIsSubmittingCode(true);
-    setGameState('submittingEvaluation'); 
-    setSubmissionResult(null);
-    let evalSuccess = false;
+    setPlayerHasSubmittedCode(true);
+    toast({title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground"});
 
-    try {
-      const evaluationInput = {
-        playerCode: code,
-        referenceSolution: question.solution,
-        problemStatement: question.problemStatement,
-        language: language,
-        difficulty: currentLobbyDetails.name,
-      };
-      const evaluation = await evaluateCodeSubmission(evaluationInput);
-      setSubmissionResult(evaluation);
-      evalSuccess = evaluation.isPotentiallyCorrect;
-
-      if (evaluation.isPotentiallyCorrect) {
-        setGameOverReason("solved");
-        toast({ title: "Submission Processed!", description: "AI assessed your solution as correct!", className: "bg-green-500 text-white" });
-        
-        const entryFee = currentLobbyDetails.entryFee;
-        const totalPot = entryFee * 2; 
-        const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
-        const winningsPaidOut = totalPot - commissionAmount;
-        
-        const playerAfterWin = { ...player, coins: player.coins + winningsPaidOut };
-        setPlayer(playerAfterWin);
-
-        toast({
-            title: "Victory Payout!",
-            description: `You won ${winningsPaidOut} coins! (Pot: ${totalPot}, Commission: ${commissionAmount}). New balance: ${playerAfterWin.coins}`,
-            className: "bg-accent text-accent-foreground",
-            duration: 7000,
-        });
-
-      } else {
-        setGameOverReason("incorrect");
-        toast({ title: "Submission Processed", description: "AI assessed your solution. See feedback below.", variant: "destructive" });
-      }
-    } catch (error) {
-        console.error("Error during code evaluation:", error);
-        toast({ title: "Evaluation Error", description: "Could not evaluate your submission. Mocking result.", variant: "destructive" });
-        const mockEvalResult: EvaluateCodeSubmissionOutput = {
-            isPotentiallyCorrect: Math.random() > 0.5, 
-            correctnessExplanation: "AI evaluation failed, this is a mock result.",
-            similarityToRefSolutionScore: Math.random(),
-            similarityToRefSolutionExplanation: "N/A due to evaluation error.",
-            estimatedTimeComplexity: "N/A",
-            estimatedSpaceComplexity: "N/A",
-            codeQualityFeedback: "Unable to provide AI feedback due to an error.",
-            overallAssessment: "Evaluation could not be completed."
-        };
-        setSubmissionResult(mockEvalResult);
-        evalSuccess = mockEvalResult.isPotentiallyCorrect;
-        setGameOverReason(evalSuccess ? "solved" : "incorrect");
-        if (evalSuccess && player && currentLobbyDetails) { 
-             const entryFee = currentLobbyDetails.entryFee;
-             const totalPot = entryFee * 2;
-             const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
-             const winningsPaidOut = totalPot - commissionAmount;
-             const playerAfterWin = { ...player, coins: player.coins + winningsPaidOut };
-             setPlayer(playerAfterWin);
-             toast({ title: "Mock Payout!", description: `Mock win! ${winningsPaidOut} coins awarded.`, className: "bg-accent text-accent-foreground"});
-        }
-    } finally {
-      setGameState('gameOver');
-      setIsSubmittingCode(false); 
+    if (opponentHasSubmittedCode) {
+      // Both have submitted, proceed to comparison
+      handleSubmissionFinalization();
+    } else {
+      // Player submitted, opponent has not
+      // UI will show "Waiting for opponent..."
     }
   };
 
   const handleTimeUp = () => {
-    if (!player || !currentLobbyDetails || gameState !== 'inGame') return;
+    if (!player || !currentLobbyDetails || gameStateRef.current !== 'inGame') return;
 
     toast({
       title: "Time's Up!",
       description: "The timer for this challenge has expired.",
       variant: "destructive",
     });
-    // setIsSubmittingCode(true); // Don't set this, as it's not a user submission
-    setGameOverReason("timeup");
-    setGameState('gameOver');
+
+    if (playerHasSubmittedCode && opponentHasSubmittedCode) {
+      setGameOverReason("timeup_both_submitted"); // Both submitted, proceed to comparison
+      handleSubmissionFinalization();
+    } else if (playerHasSubmittedCode && !opponentHasSubmittedCode) {
+      setGameOverReason("timeup_player1_submitted_only");
+      // Player 1 submitted, opponent didn't. Player 1 effectively wins, but let comparison confirm against reference.
+      // We need opponentCode for comparison; if opponent didn't submit, maybe compare P1 against ref.
+      // For now, let's assume we always have opponentCode (reference)
+      handleSubmissionFinalization(); // Pass player's code and reference as opponent code
+    } else if (!playerHasSubmittedCode && opponentHasSubmittedCode) {
+      setGameOverReason("timeup_player2_submitted_only");
+      // Opponent submitted, Player 1 didn't. Player 1 loses.
+      // Pass empty P1 code and opponent's code (reference) to comparison.
+      setCode(''); // Ensure empty code is sent if P1 didn't submit
+      handleSubmissionFinalization();
+    } else { // Neither submitted
+      setGameOverReason("timeup_neither_submitted");
+      // Player loses entry fee (already deducted). No comparison needed.
+      setGameState('gameOver');
+    }
   };
+
 
   const handleLeaveConfirm = () => {
     setShowLeaveConfirm(false);
     if (leaveConfirmType === 'search') {
         if (player && currentLobbyDetails) {
-            // Fee was already deducted, so "losing" it is implicit by not refunding.
-            // If we wanted to refund on cancel search but not on question load, logic would be more complex.
-            // For now, fee is lost if search is cancelled after initial deduction.
             toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${currentLobbyDetails.entryFee} coins was forfeited.`, variant: "default" });
         }
-        resetGameState(true); // Go back to lobby selection
-        setGameOverReason("cancelledSearch"); // Special reason if needed, or just reset
+        resetGameState(true);
+        setGameOverReason("cancelledSearch");
     } else if (leaveConfirmType === 'game') {
         if (player && currentLobbyDetails) {
              toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${currentLobbyDetails.entryFee} coins was lost.`, variant: "destructive" });
         }
-        setGameOverReason("forfeit");
-        setGameState('gameOver');
+        setGameOverReason("forfeit_player1");
+        setGameState('gameOver'); // This will show the game over screen
     }
     setLeaveConfirmType(null);
   };
@@ -346,6 +425,153 @@ export default function ArenaPage() {
   const triggerLeave = (type: 'search' | 'game') => {
     setLeaveConfirmType(type);
     setShowLeaveConfirm(true);
+  };
+
+  const getCodePlaceholder = (selectedLang: SupportedLanguage): string => {
+    switch (selectedLang) {
+      case 'javascript':
+        return `// Language: JavaScript
+// Difficulty: ${question?.difficulty || 'N/A'} (Lobby: ${currentLobbyDetails?.name || 'N/A'})
+// Problem Type: ${question?.problemStatement.substring(0,50) || 'N/A'}...
+
+function solve(params) {
+  // Your brilliant JavaScript code here!
+  // Example: const n = params.n;
+  // let result = 0;
+  /* ... your logic ... */
+  return result;
+}
+
+// The AI will evaluate the logic within your 'solve' function
+// or the primary problem-solving part of your JavaScript code.
+`;
+      case 'python':
+        return `# Language: Python
+# Difficulty: ${question?.difficulty || 'N/A'} (Lobby: ${currentLobbyDetails?.name || 'N/A'})
+# Problem Type: ${question?.problemStatement.substring(0,50) || 'N/A'}...
+
+def solve(params):
+  # Your brilliant Python code here!
+  # Example: n = params.get('n')
+  # result = 0
+  # ... your logic ...
+  return result
+
+# The AI will evaluate the logic within your 'solve' function
+# or the primary problem-solving part of your Python code.
+`;
+      case 'cpp':
+        return `// Language: C++
+// Difficulty: ${question?.difficulty || 'N/A'} (Lobby: ${currentLobbyDetails?.name || 'N/A'})
+// Problem Type: ${question?.problemStatement.substring(0,50) || 'N/A'}...
+
+#include <iostream>
+#include <vector>
+// Add other necessary headers
+
+// You might need to parse 'params' if it's a JSON string,
+// or adjust function signature based on problem.
+// For simplicity, this example assumes a basic structure.
+// The AI will look for the main problem-solving logic.
+
+// Example:
+// auto solve(const nlohmann::json& params) {
+//    int n = params["n"];
+//    int result = 0;
+//    // ... your logic ...
+//    return result;
+// }
+
+int main() {
+  // If reading from stdin as per typical competitive programming:
+  // int n;
+  // std::cin >> n;
+  // Call your main solving function here
+  // std::cout << result << std::endl;
+  return 0;
+}
+
+// The AI will evaluate your primary C++ problem-solving logic.
+`;
+      default:
+        return "// Select a language to see a placeholder.";
+    }
+  };
+
+  const handleRunTests = async () => {
+    if (!question || !question.testCases || !code) {
+        toast({ title: "Missing Data", description: "No question, test cases, or code to test.", variant: "destructive" });
+        return;
+    }
+    setIsTestingCode(true);
+    const results: TestResult[] = [];
+
+    for (const tc of question.testCases) {
+        let status: TestResult['status'] = 'not_run';
+        let actualOutput = "N/A";
+        let errorMessage: string | undefined;
+
+        if (language === 'javascript') {
+            try {
+                // Ensure the player's code defines a 'solve' function.
+                // This is a simplified execution model.
+                // WARNING: new Function() is a security risk with untrusted code.
+                // For a real app, use a sandboxed environment.
+                const playerFunction = new Function(`
+                    "use strict";
+                    ${code}
+                    if (typeof solve !== 'function') {
+                        throw new Error('The "solve" function is not defined in your code.');
+                    }
+                    return solve;
+                `)();
+
+                let parsedInput = tc.input;
+                try {
+                    // Attempt to parse input if it looks like JSON
+                    if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
+                        parsedInput = JSON.parse(tc.input);
+                    }
+                } catch (e) {
+                    // Input is not JSON or invalid JSON, use as string
+                }
+
+                const output = playerFunction(parsedInput);
+                actualOutput = typeof output === 'object' ? JSON.stringify(output) : String(output);
+
+                // Normalize expected output for comparison if it's a stringified object/array
+                let normalizedExpectedOutput = tc.expectedOutput;
+                 try {
+                    const parsedExpected = JSON.parse(tc.expectedOutput);
+                    normalizedExpectedOutput = JSON.stringify(parsedExpected);
+                } catch (e) { /* not json, use as is */ }
+
+
+                status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
+            } catch (error: any) {
+                status = 'error';
+                actualOutput = "Error during execution";
+                errorMessage = error.message || String(error);
+                console.error(`Error executing test case ${tc.name}:`, error);
+            }
+        } else { // Python, C++
+            status = 'client_unsupported';
+            actualOutput = `Client-side test for ${language} not supported. Submit for AI eval.`;
+        }
+
+        results.push({
+            testCaseName: tc.name,
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            actualOutput,
+            status,
+            errorMessage,
+            timeTaken: "N/A (mock)", // Mocked
+            memoryUsed: "N/A (mock)", // Mocked
+        });
+    }
+    setTestResults(results);
+    setIsTestingCode(false);
   };
 
 
@@ -398,101 +624,137 @@ export default function ArenaPage() {
     );
   }
 
-  if (gameState === 'submittingEvaluation') {
+  if (gameState === 'submittingComparison') { // Updated state name
     return (
       <div className="flex flex-col items-center justify-center h-full text-center">
         <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
-        <h2 className="text-2xl font-semibold text-foreground mb-2">AI Analyzing Your Code...</h2>
-        <p className="text-muted-foreground">Our AI is evaluating your solution for correctness, complexity, and quality.</p>
+        <h2 className="text-2xl font-semibold text-foreground mb-2">Duel in Progress: AI Comparing Submissions...</h2>
+        <p className="text-muted-foreground">Our AI is evaluating both your and your opponent's solutions to determine the victor.</p>
         <p className="text-sm text-muted-foreground mt-1">This might take a few moments.</p>
       </div>
     );
   }
-  
+
   if (gameState === 'gameOver') {
-    const resultIsSuccess = gameOverReason === "solved";
     const entryFeePaid = currentLobbyDetails?.entryFee || 0;
-    
-    let summaryMessage = "";
-    let title = "";
-    let icon = null;
+    let title = "Match Over";
+    let message = "";
+    let icon: React.ReactNode = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
 
     switch(gameOverReason) {
-        case 'solved':
+        case "comparison_player1_wins":
+            title = "Victory!";
             const pot = entryFeePaid * 2;
             const commission = Math.floor(pot * COMMISSION_RATE);
             const netWinnings = pot - commission;
-            summaryMessage = `You won! ${netWinnings} coins added to your balance.`;
-            title = "Victory!";
+            message = `You defeated ${mockOpponent?.username || 'your opponent'}! ${netWinnings} coins added. (Pot: ${pot}, Commission: ${commission})`;
             icon = <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" />;
             break;
-        case 'incorrect':
-            summaryMessage = `AI assessed your solution as incorrect. You lost ${entryFeePaid} coins.`;
-            title = "Better Luck Next Time!";
+        case "comparison_player2_wins":
+            title = "Defeat!";
+            message = `${mockOpponent?.username || 'Your opponent'} won the duel. You lost ${entryFeePaid} coins.`;
             icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
-        case 'timeup':
-            summaryMessage = `You ran out of time. You lost ${entryFeePaid} coins.`;
-            title = "Time's Up!";
-            icon = <TimerIcon className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
+        case "comparison_draw":
+            title = "It's a Draw!";
+            message = `The duel ended in a draw. Your entry fee of ${entryFeePaid} coins was consumed.`;
+            icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
             break;
-        case 'forfeit':
-            summaryMessage = `You forfeited the match. You lost ${entryFeePaid} coins.`;
+        case "timeup_player1_submitted_only": // P1 submitted, P2 timed out. Assume comparison still ran.
+            title = comparisonResult?.winner === 'player1' ? "Victory by Default!" : "Close Call!";
+            message = comparisonResult?.winner === 'player1'
+                ? `Your opponent timed out after you submitted! You won ${ (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE)} coins.`
+                : `Your opponent timed out. The match was close, but considered a draw. You lost ${entryFeePaid} coins.`;
+            icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : <AlertTriangle className="h-16 w-16 text-yellow-500 mx-auto mb-4" />;
+            break;
+        case "timeup_player2_submitted_only": // P2 submitted, P1 timed out.
+            title = "Defeat by Timeout";
+            message = `You ran out of time after your opponent submitted. You lost ${entryFeePaid} coins.`;
+            icon = <TimerIcon className="h-16 w-16 text-destructive mx-auto mb-4" />;
+            break;
+        case "timeup_both_submitted": // Both submitted, then time ran out. Result depends on comparison.
+             title = comparisonResult?.winner === 'player1' ? "Last Second Victory!" : (comparisonResult?.winner === 'player2' ? "Defeat at the Buzzer!" : "Draw at Timeout!");
+             message = comparisonResult?.winner === 'player1'
+                ? `You won the duel right at the end! ${ (entryFeePaid*2) - Math.floor(entryFeePaid*2*COMMISSION_RATE)} coins awarded.`
+                : (comparisonResult?.winner === 'player2' ? `Your opponent's solution was superior at timeout. You lost ${entryFeePaid} coins.` : `Duel ended in a draw at timeout. Your ${entryFeePaid} coins were consumed.`);
+            icon = comparisonResult?.winner === 'player1' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4" /> : (comparisonResult?.winner === 'player2' ? <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" /> : <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4" />);
+            break;
+        case "timeup_neither_submitted":
+            title = "Stalemate!";
+            message = `Neither you nor your opponent submitted in time. You both lost ${entryFeePaid} coins.`;
+            icon = <TimerIcon className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
+            break;
+        case "forfeit_player1":
             title = "Match Forfeited";
+            message = `You forfeited the match and lost ${entryFeePaid} coins.`;
             icon = <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
             break;
-        case 'error': // Should ideally not be hit if errors are handled by refunding/resetting
-            summaryMessage = `An error occurred. Your entry fee of ${entryFeePaid} coins may have been lost or refunded.`;
-            title = "Match Ended Due to Error";
+        case "cancelledSearch": // This state won't typically show the game over screen but reset. Added for completeness.
+            title = "Search Cancelled";
+            message = `You left the lobby. Your entry fee was forfeited.`;
+            break;
+        case "error":
+            title = "Match Error";
+            message = `An error occurred during the match. Your entry fee of ${entryFeePaid} coins may have been lost or refunded depending on the issue.`;
             icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
-        default:
-            summaryMessage = `Match ended. You lost ${entryFeePaid} coins.`;
-            title = "Match Over";
-            icon = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
     }
-
 
     return (
       <div className="container mx-auto py-8 h-full flex flex-col justify-center">
-        <Card className={`shadow-xl ${resultIsSuccess ? 'border-green-500' : 'border-destructive'}`}>
+        <Card className={`shadow-xl ${gameOverReason === "comparison_player1_wins" ? 'border-green-500' : (gameOverReason === "comparison_player2_wins" || gameOverReason === "forfeit_player1" ? 'border-destructive' : 'border-border')}`}>
           <CardHeader className="text-center">
             {icon}
             <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
             <CardDescription className="text-lg text-muted-foreground">
-              {summaryMessage}
+              {message}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {submissionResult && gameOverReason !== 'forfeit' && gameOverReason !== 'timeup' && (
-              <Card className="bg-muted/50">
-                <CardHeader>
-                  <CardTitle className="text-xl flex items-center"><Brain className="mr-2 h-5 w-5 text-primary"/> AI Analysis Report</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                        <span className="font-medium text-foreground">Overall Assessment:</span>
-                        <Badge variant={submissionResult.isPotentiallyCorrect ? "default" : "destructive"} className={submissionResult.isPotentiallyCorrect ? "bg-green-500 hover:bg-green-600 text-white" : ""}>
-                            {submissionResult.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}
-                        </Badge>
+            {comparisonResult && (gameOverReason.startsWith("comparison_") || gameOverReason.startsWith("timeup_")) && (
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="comparison-details">
+                  <AccordionTrigger className="text-lg hover:no-underline">
+                    <Brain className="mr-2 h-5 w-5 text-primary"/> Detailed AI Duel Report
+                  </AccordionTrigger>
+                  <AccordionContent className="space-y-4 pt-4">
+                    <div>
+                        <h4 className="font-semibold text-md text-foreground mb-1">Overall Duel Result:</h4>
+                        <p><span className="font-medium">Winner:</span> {comparisonResult.winner === 'player1' ? (player?.username || 'You') : (comparisonResult.winner === 'player2' ? (mockOpponent?.username || 'Opponent') : 'Draw')}</p>
+                        <p><span className="font-medium">Reason:</span> {comparisonResult.winningReason}</p>
+                        <p><span className="font-medium">Comparison Summary:</span> {comparisonResult.comparisonSummary}</p>
                     </div>
-                    <p><span className="font-medium text-foreground">Explanation:</span> {submissionResult.correctnessExplanation}</p>
-                    <p><span className="font-medium text-foreground">Summary:</span> {submissionResult.overallAssessment}</p>
-                    
-                    <h4 className="font-semibold text-md text-foreground pt-2">Code Details:</h4>
-                    <p><span className="font-medium">Similarity to Reference:</span> {(submissionResult.similarityToRefSolutionScore * 100).toFixed(0)}%</p>
-                    <p><span className="font-medium">Similarity Explanation:</span> {submissionResult.similarityToRefSolutionExplanation}</p>
-                    <p><span className="font-medium">Est. Time Complexity:</span> {submissionResult.estimatedTimeComplexity}</p>
-                    <p><span className="font-medium">Est. Space Complexity:</span> {submissionResult.estimatedSpaceComplexity}</p>
-                    
-                    <h4 className="font-semibold text-md text-foreground pt-2">Quality Feedback:</h4>
-                    <ScrollArea className="h-24 p-2 border rounded-md bg-background">
-                        <p className="whitespace-pre-wrap">{submissionResult.codeQualityFeedback}</p>
-                    </ScrollArea>
-                </CardContent>
-              </Card>
+                    <Accordion type="multiple" className="w-full space-y-2">
+                        <AccordionItem value="player1-eval">
+                            <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Your Submission ({player?.username})</AccordionTrigger>
+                            <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
+                                <p><strong>Correctness:</strong> {comparisonResult.player1Evaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}</p>
+                                <p><strong>Explanation:</strong> {comparisonResult.player1Evaluation.correctnessExplanation}</p>
+                                <p><strong>Time Complexity:</strong> {comparisonResult.player1Evaluation.estimatedTimeComplexity}</p>
+                                <p><strong>Space Complexity:</strong> {comparisonResult.player1Evaluation.estimatedSpaceComplexity}</p>
+                                <p><strong>Quality Feedback:</strong></p>
+                                <ScrollArea className="h-20 p-1 border rounded text-xs bg-background"><pre className="whitespace-pre-wrap">{comparisonResult.player1Evaluation.codeQualityFeedback}</pre></ScrollArea>
+                                <p><strong>Overall:</strong> {comparisonResult.player1Evaluation.overallAssessment}</p>
+                            </AccordionContent>
+                        </AccordionItem>
+                         <AccordionItem value="player2-eval">
+                            <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Opponent's Submission ({mockOpponent?.username})</AccordionTrigger>
+                            <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
+                                <p><strong>Correctness:</strong> {comparisonResult.player2Evaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}</p>
+                                <p><strong>Explanation:</strong> {comparisonResult.player2Evaluation.correctnessExplanation}</p>
+                                <p><strong>Time Complexity:</strong> {comparisonResult.player2Evaluation.estimatedTimeComplexity}</p>
+                                <p><strong>Space Complexity:</strong> {comparisonResult.player2Evaluation.estimatedSpaceComplexity}</p>
+                                <p><strong>Quality Feedback:</strong></p>
+                                <ScrollArea className="h-20 p-1 border rounded text-xs bg-background"><pre className="whitespace-pre-wrap">{comparisonResult.player2Evaluation.codeQualityFeedback}</pre></ScrollArea>
+                                <p><strong>Overall:</strong> {comparisonResult.player2Evaluation.overallAssessment}</p>
+                            </AccordionContent>
+                        </AccordionItem>
+                    </Accordion>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             )}
-             <div className="text-center text-muted-foreground">
+            <div className="text-center text-muted-foreground">
                 Your coins: {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
             </div>
             <Button onClick={() => resetGameState(true)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
@@ -526,29 +788,10 @@ export default function ArenaPage() {
     if (!question || !mockOpponent || !currentLobbyDetails) {
        return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Preparing match...</div>;
     }
-    
-    const codePlaceholder = `// Language: ${language}
-// Difficulty: ${question.difficulty} (Lobby: ${currentLobbyDetails.name})
-// Problem Type: ${question.problemStatement.substring(0,50)}... 
-// Remember to define your main function, e.g.:
-
-function solve(params) {
-  // Your brilliant code here!
-  // Example structure if problem involves numbers n and m:
-  // const n = params.n; 
-  // const m = params.m;
-  // let result = 0;
-  // /* ... your logic ... */
-  return result;
-}
-
-// The AI will evaluate the logic within your 'solve' function
-// or the primary problem-solving part of your code.
-// Ensure your return type matches the problem's output specification.
-`;
 
     return (
       <div className="flex flex-col gap-4 h-full p-4 md:p-6">
+        {/* Player Info Header */}
         <Card className="shadow-md shrink-0">
           <CardContent className="p-3 flex justify-around items-center text-sm">
             <div className="flex items-center gap-2">
@@ -573,85 +816,166 @@ function solve(params) {
           </CardContent>
         </Card>
 
+        {/* Problem and Solution Area */}
         <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
+            {/* Problem Display */}
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-            <CardHeader className="bg-card-foreground/5">
-                <div className="flex justify-between items-center">
-                    <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
-                    <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
-                </div>
-            </CardHeader>
-            <CardContent className="p-0 flex-grow overflow-y-auto">
-                <ProblemDisplay question={question} />
-            </CardContent>
+              <CardHeader className="bg-card-foreground/5">
+                  <div className="flex justify-between items-center">
+                      <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
+                      <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
+                  </div>
+              </CardHeader>
+              <CardContent className="p-0 flex-grow overflow-y-auto">
+                  <ProblemDisplay question={question} />
+              </CardContent>
             </Card>
 
+            {/* Code Editor and Test Area */}
             <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-            <CardHeader className="bg-card-foreground/5">
-                <div className="flex justify-between items-center">
-                 <div className="flex items-center gap-2">
-                    <CardTitle className="text-2xl">Your Solution</CardTitle>
-                    <TooltipProvider>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <HelpCircle className="h-5 w-5 text-muted-foreground cursor-help" />
-                            </TooltipTrigger>
-                            <TooltipContent side="bottom" className="max-w-xs">
-                                <p>The AI will analyze your code for correctness, efficiency (time/space complexity), and quality compared to the reference solution.</p>
-                            </TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
-                </div>
-                <Select value={language} onValueChange={setLanguage} disabled={isSubmittingCode || timeRemaining === 0}>
-                    <SelectTrigger className="w-[180px] bg-background">
-                    <SelectValue placeholder="Select language" />
-                    </SelectTrigger>
-                    <SelectContent>
-                    <SelectItem value="javascript">JavaScript</SelectItem>
-                    <SelectItem value="python" disabled>Python (soon)</SelectItem>
-                    <SelectItem value="java" disabled>Java (soon)</SelectItem>
-                    <SelectItem value="cpp" disabled>C++ (soon)</SelectItem>
-                    </SelectContent>
-                </Select>
-                </div>
-                <CardDescription>Write your code below. Defeat {mockOpponent.username}!</CardDescription>
-            </CardHeader>
-            <CardContent className="flex-grow p-4 flex flex-col">
-                <Textarea
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder={codePlaceholder}
-                className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[300px]"
-                disabled={isSubmittingCode || timeRemaining === 0}
-                />
-            </CardContent>
-            <div className="p-4 border-t flex flex-col gap-2">
-                <Button 
-                onClick={handleSubmitCode} 
-                disabled={isSubmittingCode || !code.trim() || timeRemaining === 0 || gameState === 'submittingEvaluation'}
-                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-                >
-                {gameState === 'submittingEvaluation' ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                    <Send className="mr-2 h-4 w-4" />
-                )}
-                Submit for AI Evaluation
-                </Button>
-                 <Button variant="outline" onClick={() => triggerLeave('game')} disabled={isSubmittingCode || timeRemaining === 0 || gameState === 'submittingEvaluation'} className="w-full">
-                    <Flag className="mr-2 h-4 w-4" /> Forfeit Match
-                </Button>
-                {timeRemaining === 0 && (
-                 <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Submission disabled.</p>
-                )}
-            </div>
+              <CardHeader className="bg-card-foreground/5">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        <CardTitle className="text-2xl">Your Solution</CardTitle>
+                        <TooltipProvider>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <HelpCircle className="h-5 w-5 text-muted-foreground cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom" className="max-w-xs">
+                                    <p>The AI will analyze your code for correctness, efficiency, and quality compared to the reference solution and opponent.</p>
+                                </TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    </div>
+                    <Select value={language} onValueChange={(value) => setLanguage(value as SupportedLanguage)} disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}>
+                        <SelectTrigger className="w-[180px] bg-background">
+                        <SelectValue placeholder="Select language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="javascript">JavaScript</SelectItem>
+                          <SelectItem value="python">Python</SelectItem>
+                          <SelectItem value="cpp">C++</SelectItem>
+                        </SelectContent>
+                    </Select>
+                  </div>
+                  <CardDescription>Write your code below. Defeat {mockOpponent.username}!</CardDescription>
+                  {opponentHasSubmittedCode && !playerHasSubmittedCode && timeRemaining > 0 && (
+                    <p className="mt-2 text-sm text-yellow-600 animate-pulse">Opponent has submitted! Your turn.</p>
+                  )}
+                  {playerHasSubmittedCode && !opponentHasSubmittedCode && timeRemaining > 0 && (
+                    <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>
+                  )}
+              </CardHeader>
+              <CardContent className="flex-grow p-4 flex flex-col min-h-0">
+                  <Textarea
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    placeholder={getCodePlaceholder(language)}
+                    className="flex-grow font-mono text-sm resize-none bg-input/50 border-input focus:border-primary min-h-[200px] md:min-h-[250px]" // Adjusted min-height
+                    disabled={isComparing || playerHasSubmittedCode || timeRemaining === 0}
+                  />
+              </CardContent>
+              {/* Test Cases Section */}
+              <Accordion type="single" collapsible className="w-full px-4 pb-2">
+                <AccordionItem value="test-cases">
+                    <AccordionTrigger className="text-md hover:no-underline py-2">
+                        <PlaySquare className="mr-2 h-5 w-5 text-muted-foreground"/> View & Run Test Cases
+                    </AccordionTrigger>
+                    <AccordionContent className="space-y-3 pt-2">
+                        {question.testCases && question.testCases.length > 0 ? (
+                            <>
+                                <div className="max-h-48 overflow-y-auto pr-2">
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead>Name</TableHead>
+                                                <TableHead>Input</TableHead>
+                                                <TableHead>Expected Output</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {question.testCases.map((tc, idx) => (
+                                                <TableRow key={idx}>
+                                                    <TableCell className="font-medium text-xs">{tc.name}</TableCell>
+                                                    <TableCell className="text-xs"><pre className="whitespace-pre-wrap bg-muted/50 p-1 rounded text-xs">{tc.input}</pre></TableCell>
+                                                    <TableCell className="text-xs"><pre className="whitespace-pre-wrap bg-muted/50 p-1 rounded text-xs">{tc.expectedOutput}</pre></TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
+                                </div>
+                                <Button onClick={handleRunTests} disabled={isTestingCode || !code.trim() || playerHasSubmittedCode || timeRemaining === 0} className="w-full mt-2" variant="outline">
+                                    {isTestingCode ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Run My Code Against Tests
+                                </Button>
+                                {language !== 'javascript' && (
+                                  <div className="mt-2 p-2 text-xs text-muted-foreground bg-muted rounded-md flex items-start">
+                                    <Info size={16} className="mr-2 mt-0.5 shrink-0 text-blue-500"/>
+                                    Client-side test execution for {language.toUpperCase()} is not supported. Please verify logic manually. AI evaluation on submission will process your code.
+                                  </div>
+                                )}
+                                {testResults.length > 0 && (
+                                    <ScrollArea className="mt-2 max-h-48">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Test</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Actual Output</TableHead>
+                                                    <TableHead>Time</TableHead>
+                                                    <TableHead>Memory</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {testResults.map((res, idx) => (
+                                                    <TableRow key={idx} className={res.status === 'pass' ? 'bg-green-500/10' : (res.status === 'fail' ? 'bg-red-500/10' : (res.status === 'error' ? 'bg-yellow-500/10' : ''))}>
+                                                        <TableCell className="font-medium text-xs">{res.testCaseName}</TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={res.status === 'pass' ? 'default' : (res.status === 'fail' || res.status === 'error' ? 'destructive' : 'secondary')}
+                                                                   className={cn("capitalize text-xs", res.status === 'pass' ? 'bg-green-500 text-white hover:bg-green-600' : '')}>
+                                                                {res.status === 'client_unsupported' ? 'Manual Check' : res.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-xs">
+                                                            <pre className="whitespace-pre-wrap max-w-xs truncate">{res.actualOutput}</pre>
+                                                            {res.errorMessage && <p className="text-destructive text-xs mt-1">{res.errorMessage}</p>}
+                                                        </TableCell>
+                                                        <TableCell className="text-xs">{res.timeTaken}</TableCell>
+                                                        <TableCell className="text-xs">{res.memoryUsed}</TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </ScrollArea>
+                                )}
+                            </>
+                        ) : <p className="text-sm text-muted-foreground">No test cases provided for this challenge.</p>}
+                    </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+              {/* Action Buttons */}
+              <div className="p-4 border-t flex flex-col gap-2">
+                  <Button
+                    onClick={handleSubmitCode}
+                    disabled={isComparing || playerHasSubmittedCode || !code.trim() || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'}
+                    className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+                  >
+                  {isComparing || gameStateRef.current === 'submittingComparison' ? (<Loader2 className="mr-2 h-4 w-4 animate-spin" />) : (<Send className="mr-2 h-4 w-4" />)}
+                  {playerHasSubmittedCode ? "Code Submitted" : "Submit for Final AI Duel"}
+                  </Button>
+                  <Button variant="outline" onClick={() => triggerLeave('game')} disabled={isComparing || timeRemaining === 0 || gameStateRef.current === 'submittingComparison'} className="w-full">
+                      <Flag className="mr-2 h-4 w-4" /> Forfeit Match
+                  </Button>
+                  {timeRemaining === 0 && !playerHasSubmittedCode && (
+                   <p className="mt-2 text-sm text-destructive flex items-center"><AlertTriangle className="mr-1 h-4 w-4" />Time's up! Your solution will be auto-submitted if any code is present, or considered a non-submission.</p>
+                  )}
+              </div>
             </Card>
         </div>
       </div>
     );
   }
 
-  // Fallback for unhandled states or errors - should ideally not be reached
   return (
       <div className="flex flex-col items-center justify-center h-full">
         <p className="mb-4">An unexpected state has occurred.</p>
@@ -660,12 +984,12 @@ function solve(params) {
   );
 }
 
-// Confirmation Dialog for Leaving Lobby/Game
+//ArenaLeaveConfirmationDialog remains the same as provided previously
 export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | null }) {
   if (!type) return null;
-  
+
   const title = type === 'search' ? "Cancel Search?" : "Forfeit Match?";
-  const description = type === 'search' 
+  const description = type === 'search'
     ? "Are you sure you want to cancel the search and leave the lobby? Your entry fee will be forfeited."
     : "Are you sure you want to forfeit the match? This will count as a loss, and your entry fee will be forfeited.";
 
