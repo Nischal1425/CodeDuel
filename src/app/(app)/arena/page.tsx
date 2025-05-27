@@ -501,46 +501,30 @@ export default function ArenaPage() {
 
 
   const getCodePlaceholder = (selectedLang: SupportedLanguage, currentQuestion: GenerateCodingChallengeOutput | null): string => {
-    const defaultPlaceholders = {
-        javascript: `function solve(params) {\n  // Your code here\n  return;\n}`,
-        python: `def solve(params):\n  # Your code here\n  pass\n  return None`,
-        cpp: `#include <iostream>\n#include <vector>\n#include <string>\n// Add other necessary headers\n\nclass Solution {\npublic:\n    // Define your method here based on the problem statement\n    // e.g., int solve(int input) {\n    //     // Your code here\n    //     return 0;\n    // }\n};\n`
-    };
-
     if (!currentQuestion?.functionSignature) {
-        return defaultPlaceholders[selectedLang];
+      // Fallback if no specific signature is provided
+      if (selectedLang === 'javascript') return `function solve(params) {\n  // Your code here\n  return;\n}`;
+      if (selectedLang === 'python') return `def solve(params):\n  # Your code here\n  return None`;
+      if (selectedLang === 'cpp') return `#include <iostream>\n#include <vector>\n#include <string>\n\nclass Solution {\npublic:\n    // Define your method here based on the problem statement\n    // e.g., int solve(int input) {\n    //     // Your code here\n    //     return 0;\n    // }\n};\n\n// For local testing (optional):\n/*\nint main() {\n    Solution sol;\n    // Call your method, e.g.: std::cout << sol.solve(5) << std::endl;\n    return 0;\n}\n*/`;
+      return "// Select a language";
     }
 
-    const { name: funcName, params: funcParams, signature: funcSignatureItself, returnType } = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
-
-    let body = `\n  // Your code here\n`;
-    let returnStatement = "";
+    const { name: funcName, params: funcParamsStr, signature: funcSignatureItself, returnType } = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
 
     if (selectedLang === 'javascript') {
-        if (returnType && returnType !== 'void' && returnType !== 'any' && !returnType.toLowerCase().includes('undefined')) {
-            returnStatement = `\n  return; // TODO: Expected return type: ${returnType}\n`;
-        } else {
-            returnStatement = `\n  return;\n`;
-        }
-        return `${funcSignatureItself.replace(/\{\s*\}$/, '')} {${body}${returnStatement}}`;
+      return `${funcSignatureItself} {\n  // Your code here for ${funcName}\n  \n  return; // Expected return type: ${returnType}\n}`;
     } else if (selectedLang === 'python') {
-        body = `\n  # Your code here\n  pass\n`;
-        if (returnType && returnType !== 'None' && returnType) {
-            returnStatement = `  # TODO: Expected return type: ${returnType}\n`;
-        }
-        return `${funcSignatureItself.replace(/:$/, '')}:${body}${returnStatement}`;
+      return `${funcSignatureItself.replace(/:$/, '')}:\n  # Your code here for ${funcName}\n  # Example: print(${funcParamsStr.join(', ') || '"params_for_funcName"'}) \n  pass\n  return None # Expected return type: ${returnType}`;
     } else if (selectedLang === 'cpp') {
-        let cppHeaders = `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n// Add other necessary headers based on the problem\n\n`;
-        if (returnType && returnType !== 'void') {
-             body += `\n  // TODO: Expected return type: ${returnType}\n  return {}; // Placeholder return, adjust as needed\n`;
-        } else {
-            body += `\n`;
-        }
-        // Ensure the signature doesn't already have a body
-        const signatureOnly = funcSignatureItself.replace(/\s*\{[^]*\}\s*$/, '');
-        return `${cppHeaders}class Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};`;
+      let cppHeaders = `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm>\n// Add other necessary headers based on the problem\n\n`;
+      const signatureOnly = funcSignatureItself.replace(/\s*\{[^]*\}\s*$/, ''); // Remove existing body if any
+      let body = `\n  // Your code here for ${funcName}\n`;
+      if (returnType && returnType.toLowerCase() !== 'void') {
+        body += `  // TODO: Expected return type: ${returnType}\n  return {}; // Placeholder, adjust as needed\n`;
+      }
+      return `${cppHeaders}class Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};\n\n// For local testing (optional):\n/*\nint main() {\n    Solution sol;\n    // Example: std::vector<int> nums = {1, 2, 3};\n    // int target = 5;\n    // auto result = sol.${funcName}(nums, target);\n    // for(int x : result) std::cout << x << " "; std::cout << std::endl;\n    return 0;\n}\n*/`;
     }
-    return defaultPlaceholders[selectedLang];
+    return "// Language not fully supported for detailed placeholder yet.";
   };
 
 
@@ -557,6 +541,7 @@ export default function ArenaPage() {
         return;
     }
     setIsTestingCode(true);
+    setTestResults([]); // Clear previous results
     const results: TestResult[] = [];
 
     const signatureInfo = question.functionSignature ? parseFunctionSignature(question.functionSignature, language) : null;
@@ -569,74 +554,95 @@ export default function ArenaPage() {
 
         if (language === 'javascript' && signatureInfo) {
             try {
-                let parsedInput: any = tc.input;
+                let parsedInput: any;
                 try {
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
-                    } else if (tc.input.startsWith('"') && tc.input.endsWith('"')) {
-                         parsedInput = tc.input.slice(1, -1);
+                    } else if (tc.input.startsWith('"') && tc.input.endsWith('"') && tc.input.length > 1) {
+                         parsedInput = tc.input.slice(1, -1); // Unescape string literal
                     } else if (tc.input.trim() !== '' && !isNaN(Number(tc.input))) {
                          parsedInput = Number(tc.input);
+                    } else {
+                        parsedInput = tc.input; // Pass as is if not clearly JSON or Number
                     }
                 } catch (e) {
                     console.warn("Test case input was not valid JSON or number, passing as string: ", tc.input);
+                    parsedInput = tc.input;
                 }
+                
+                // Dynamically construct the 'solve(params)' wrapper
+                const playerCodeFunctionItself = code; // The user's direct code
+                const functionNameToCall = signatureInfo.name;
+                const functionParamsExpected = signatureInfo.params;
 
-                const paramsForPlayerFunc = signatureInfo.params.length === 1 && typeof parsedInput !== 'object' && parsedInput !== null
-                    ? [parsedInput]
-                    : signatureInfo.params.map(p => (parsedInput && typeof parsedInput === 'object') ? parsedInput[p] : undefined);
 
-
-                const scriptToRun = `
+                let scriptToRun = `
                     "use strict";
-                    // Player's code:
-                    ${code}
+                    // Player's submitted code:
+                    ${playerCodeFunctionItself}
 
-                    // Wrapper to call the player's function from solve(params)
+                    // Wrapper to call the player's specific function from a generic solve(params)
                     function solve(params) {
-                      const playerFuncArgs = ${JSON.stringify(signatureInfo.params)}.map(paramName => params && typeof params === 'object' ? params[paramName] : ( ${signatureInfo.params.length} === 1 ? params : undefined) );
-
-                      if (typeof ${signatureInfo.name} !== 'function') {
-                          throw new Error('The function "${signatureInfo.name}" is not defined or not a function in your code.');
+                      if (typeof ${functionNameToCall} !== 'function') {
+                        throw new Error('The function "${functionNameToCall}" is not defined or not a function in your code as expected by the problem signature: ${signatureInfo.signature}');
                       }
-                      return ${signatureInfo.name}(...playerFuncArgs);
+                      
+                      // Determine how to pass params to the player's function
+                      let argsForPlayerFunc;
+                      if (${functionParamsExpected.length} === 0) {
+                          argsForPlayerFunc = [];
+                      } else if (${functionParamsExpected.length} === 1 && (typeof params !== 'object' || params === null || Array.isArray(params) )) {
+                          // Single parameter expected by player's func, and 'params' is not an object (or is an array which can be a single param)
+                          argsForPlayerFunc = [params];
+                      } else if (typeof params === 'object' && params !== null) {
+                          // Multiple parameters expected, extract them from 'params' object by name
+                          argsForPlayerFunc = ${JSON.stringify(functionParamsExpected)}.map(paramName => {
+                            if (params.hasOwnProperty(paramName)) {
+                                return params[paramName];
+                            }
+                            // If a named param is missing, this could be an issue, or the problem intends fewer args
+                            // For now, pass undefined; problem statement should be clear.
+                            console.warn("Parameter '"+paramName+"' not found in test case input params object:", params);
+                            return undefined; 
+                          });
+                      } else {
+                          // Fallback or error if params structure doesn't match expectation
+                          console.error("Unexpected 'params' structure for function ${functionNameToCall}:", params);
+                          throw new Error("Mismatch between test case input structure and expected parameters for ${functionNameToCall}.");
+                      }
+                      return ${functionNameToCall}(...argsForPlayerFunc);
                     }
-
-                    // For direct testing if params is simple:
-                    // If test input 'tc.input' represents a single argument for player's function (not an object for solve(params))
-                    // We will pass 'parsedInput' to solve, which will then pass it to the player's function if it expects one arg.
-                    // If player's function expects multiple args, 'parsedInput' must be an object.
-                    return solve(${signatureInfo.params.length === 1 && typeof parsedInput !== 'object' ? JSON.stringify(parsedInput) : JSON.stringify(parsedInput)});
+                    return solve(${JSON.stringify(parsedInput)}); // Pass the parsed test case input to solve
                 `;
-
+                
                 let outputFromSolve;
                 try {
-                    const playerFunctionFactory = new Function(scriptToRun);
-                    outputFromSolve = playerFunctionFactory();
+                  const playerFunctionFactory = new Function(scriptToRun);
+                  outputFromSolve = playerFunctionFactory();
                 } catch (solveError: any) {
-                    throw new Error(`Error during execution of your wrapped solution: ${solveError.message || String(solveError)}`);
+                    // This catch is for errors *during* the execution of the dynamically created function
+                    throw new Error(`Execution error in your solution: ${solveError.message || String(solveError)}`);
                 }
 
-                actualOutput = typeof outputFromSolve === 'object' && outputFromSolve !== null ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
-
+                actualOutput = outputFromSolve === undefined ? "undefined" : (typeof outputFromSolve === 'object' && outputFromSolve !== null ? JSON.stringify(outputFromSolve) : String(outputFromSolve));
+                
                 let normalizedExpectedOutput = tc.expectedOutput;
-                 try {
+                try { // Try to normalize JSON strings for consistent comparison
                     const parsedExpected = JSON.parse(tc.expectedOutput);
                     normalizedExpectedOutput = JSON.stringify(parsedExpected);
                 } catch (e) { /* not json, use as is for comparison */ }
 
-
                 status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
 
-            } catch (error: any) {
+            } catch (error: any) { // This catch is for errors in the setup or outer try block
                 status = 'error';
                 actualOutput = "Error during test execution";
                 errorMessage = error.message || String(error);
                 console.error("Test execution error details:", error);
             }
-        } else {
+        } else { // Python or C++
             status = 'client_unsupported';
-            actualOutput = `Client-side test for ${language.toUpperCase()} not supported. Submit for AI eval.`;
+            actualOutput = "N/A";
         }
 
         results.push({
@@ -646,8 +652,8 @@ export default function ArenaPage() {
             actualOutput,
             status,
             errorMessage,
-            timeTaken: "N/A",
-            memoryUsed: "N/A",
+            timeTaken: "N/A", // Mocked
+            memoryUsed: "N/A", // Mocked
         });
     }
     setTestResults(results);
@@ -1015,7 +1021,7 @@ export default function ArenaPage() {
                                                         <TableCell className="font-medium text-xs">{res.testCaseName}</TableCell>
                                                         <TableCell>
                                                             <Badge variant={res.status === 'pass' ? 'default' : (res.status === 'fail' || res.status === 'error' ? 'destructive' : 'secondary')}
-                                                                   className={cn("capitalize text-xs", res.status === 'pass' ? 'bg-green-500 text-white hover:bg-green-600' : '')}>
+                                                                   className={cn("capitalize text-xs", res.status === 'pass' ? 'bg-green-500 text-white hover:bg-green-600' : (res.status === 'client_unsupported' ? 'bg-muted hover:bg-muted/80 text-muted-foreground' : ''))}>
                                                                 {res.status === 'client_unsupported' ? 'Manual Check' : res.status}
                                                             </Badge>
                                                         </TableCell>
@@ -1095,5 +1101,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
