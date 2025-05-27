@@ -194,7 +194,7 @@ export default function ArenaPage() {
 
     setGameState('submittingComparison');
     setIsComparing(true);
-    setComparisonResult(null);
+    setComparisonResult(null); // Clear previous comparison result
 
     try {
       const comparisonInput = {
@@ -456,47 +456,56 @@ export default function ArenaPage() {
 
     try {
         if (lang === 'javascript') {
-            const funcRegex = /function\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)\s*(?::\s*([^{]*))?/;
+            // Regex to capture: function NAME(PARAMS_STRING) [: RETURN_TYPE] {
+            const funcRegex = /function\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)(?:\s*:\s*([^{]*))?/;
             const match = signature.match(funcRegex);
             if (match) {
                 name = match[1];
+                // Split params, trim whitespace, and remove default initializers for param names
                 params = match[2].trim() ? match[2].split(',').map(p => p.trim().split('=')[0].trim()) : [];
-                sig = `function ${name}(${params.join(', ')})`;
+                sig = `function ${name}(${params.join(', ')})`; // Reconstruct signature with cleaned params
                 if (match[3]) returnType = match[3].trim();
             } else {
+                 // Fallback if regex doesn't match complex signature from AI
                  sig = `function ${name}(${params.join(', ')})`;
             }
         } else if (lang === 'python') {
-            const funcRegex = /def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)\s*(->\s*([a-zA-Z0-9_\[\], ]+))?:/;
+            // Regex to capture: def NAME(PARAMS_STRING) [-> RETURN_TYPE]:
+            const funcRegex = /def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)(?:\s*->\s*([a-zA-Z0-9_\[\], ]+))?:\s*$/;
             const match = signature.match(funcRegex);
             if (match) {
                 name = match[1];
+                // Split params, trim, remove default initializers & type hints for param names
                 params = match[2].trim() ? match[2].split(',').map(p => p.trim().split('=')[0].trim().split(':')[0].trim()) : [];
-                sig = `def ${name}(${match[2]})`; // Keep original params string
-                if(match[4]) returnType = match[4].trim(); else returnType = 'None';
+                sig = `def ${name}(${match[2]})`; // Keep original params string for placeholder fidelity
+                if(match[3]) returnType = match[3].trim(); else returnType = 'None'; // Python default return
             } else {
-                 sig = `def ${name}(${params.join(', ')}):`;
+                 sig = `def ${name}(${params.join(', ')}):`; // Fallback
                  returnType = 'None';
             }
         } else if (lang === 'cpp') {
+            // Regex to capture: RETURN_TYPE NAME(PARAMS_STRING)
+            // This is a simplified regex and might struggle with complex C++ types or templates in return/params.
             const cppFuncRegex = /([\w:<>,\s\*&]+?)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)/;
             const match = signature.match(cppFuncRegex);
             if (match) {
                 returnType = match[1].trim();
                 name = match[2].trim();
                 const paramsStr = match[3].trim();
+                // Extract only param names, discarding types and defaults for the 'params' array
                 params = paramsStr ? paramsStr.split(',').map(p => {
-                    const parts = p.trim().split(/\s+/);
-                    return parts[parts.length -1].replace(/[&*]/g, '').trim();
+                    const parts = p.trim().split(/\s+/); // Split by space to separate type and name
+                    return parts[parts.length -1].replace(/[&*]/g, '').trim(); // Get last part (name), remove &*
                 }) : [];
-                sig = `${returnType} ${name}(${paramsStr})`;
+                sig = `${returnType} ${name}(${paramsStr})`; // Full signature for placeholder
             } else {
-                sig = `void ${name}(/* parameters */)`;
+                sig = `void ${name}(/* parameters */)`; // Fallback
                 returnType = 'void';
             }
         }
     } catch (e) {
         console.error("Error parsing function signature:", signature, e);
+        // Reset to generic defaults if parsing fails spectacularly
         if (lang === 'javascript') sig = `function solve(params)`;
         else if (lang === 'python') sig = `def solve(params):`;
         else if (lang === 'cpp') sig = `void solve(/* params */)`;
@@ -522,23 +531,22 @@ export default function ArenaPage() {
     const { name: funcName, params: funcParamsList, signature: providedSignature, returnType } = parseFunctionSignature(currentQuestion.functionSignature, selectedLang);
 
     if (selectedLang === 'javascript') {
-      return `function ${funcName}(${funcParamsList.join(', ')}) {\n  // Your code here for ${funcName}\n  // Expected return type: ${returnType}\n  return;\n}`;
+      return `${providedSignature} {\n  // Your code here for ${funcName}\n  // Expected return type: ${returnType}\n  \n  return; // Adjust return type as needed\n}`;
     } else if (selectedLang === 'python') {
-      // Ensure signature ends with a colon for Python
       const pythonSignature = providedSignature.endsWith(':') ? providedSignature : `${providedSignature}:`;
-      return `${pythonSignature}\n  # Your code here for ${funcName}\n  # Expected return type: ${returnType}\n  pass\n  # return None`;
+      return `${pythonSignature}\n  # Your code here for ${funcName}\n  # Expected return type: ${returnType}\n  pass\n  # return None # Adjust return type as needed`;
     } else if (selectedLang === 'cpp') {
       // Remove any existing body from AI's signature string if it accidentally included one
       const signatureOnly = providedSignature.replace(/\s*\{[^]*\}\s*$/, '');
       let body = `\n  // Your code here for ${funcName}\n`;
-      if (returnType && returnType.toLowerCase() !== 'void' && !returnType.includes("std::ostream")) {
+      if (returnType && returnType.toLowerCase() !== 'void' && !returnType.includes("std::ostream") && !returnType.startsWith("void")) {
         body += `  // TODO: Expected return type: ${returnType}\n  return {}; // Placeholder, adjust as needed\n`;
-      } else if (returnType.includes("std::ostream")) { // Handle cout-style problems
-        body += `  // TODO: Print to cout as per problem statement\n`;
+      } else if (returnType.includes("std::ostream") || returnType.startsWith("void")) {
+        body += `  // TODO: Implement logic. Print to cout if ostream, or ensure void function completes.\n`;
       }
 
 
-      return `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm> // Common algorithms\n#include <map> // Common data structures\n#include <set> // Common data structures\n// Add other necessary headers based on the problem\n\n// using namespace std; // Optional: uncomment if you prefer\n\nclass Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};\n\n// Optional main for local testing:\n/*\nint main() {\n    Solution sol;\n    // Example usage based on funcName and params:\n    // e.g., if funcName is "twoSum" and params are "nums, target":\n    // std::vector<int> nums_val = {2, 7, 11, 15};\n    // int target_val = 9;\n    // std::vector<int> result = sol.${funcName}(nums_val, target_val);\n    // for (int x : result) { std::cout << x << " "; }\n    // std::cout << std::endl;\n    return 0;\n}\n*/`;
+      return `#include <iostream>\n#include <vector>\n#include <string>\n#include <algorithm> // Common algorithms\n#include <map> // Common data structures\n#include <set> // Common data structures\n// Add other necessary headers based on the problem\n\n// using namespace std; // Optional: uncomment if you prefer\n\nclass Solution {\npublic:\n    ${signatureOnly} {${body}    }\n};\n\n// Optional main for local testing (will not be run by evaluator):\n/*\nint main() {\n    Solution sol;\n    // Example usage based on funcName and params, adapt to your specific problem's signature\n    // e.g., if funcName is "twoSum" and params are "nums, target":\n    // std::vector<int> nums_val = {2, 7, 11, 15};\n    // int target_val = 9;\n    // std::vector<int> result = sol.${funcName}(nums_val, target_val);\n    // for (int x : result) { std::cout << x << " "; }\n    // std::cout << std::endl;\n    return 0;\n}\n*/`;
     }
     return defaultPlaceholders[selectedLang] || "// Language not fully supported for detailed placeholder yet.";
   };
@@ -572,6 +580,7 @@ export default function ArenaPage() {
             try { // Outer try for parsing input and general setup
                 let parsedInput: any;
                 try {
+                    // Attempt to parse if it looks like JSON object/array, or string literal, or number
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
                     } else if (tc.input.startsWith('"') && tc.input.endsWith('"') && tc.input.length >= 2) {
@@ -579,55 +588,70 @@ export default function ArenaPage() {
                     } else if (tc.input.trim() !== '' && !isNaN(Number(tc.input))) {
                          parsedInput = Number(tc.input);
                     } else {
-                        parsedInput = tc.input; 
+                        parsedInput = tc.input; // Pass as raw string if not clearly JSON/number/string literal
                     }
                 } catch (e) {
-                    console.warn("Test case input was not valid JSON or number, attempting to pass as string: ", tc.input);
+                    console.warn("Test case input was not valid JSON or number, attempting to pass as string: ", tc.input, e);
                     parsedInput = tc.input; // Fallback to raw string if parsing fails
                 }
                 
-                const playerCodeFunctionItself = code;
+                // Player's code as written in the textarea
+                const playerCodeItself = code;
+                // The name of the function the player is supposed to implement (e.g., "twoSum")
                 const functionNameToCall = signatureInfo.name;
+                // The parameter names the player's function expects (e.g., ["nums", "target"])
                 const functionParamsExpected = signatureInfo.params;
 
+                // Dynamically construct the script to run
+                // This script defines a 'solve(params_wrapper)' function which then calls the player's specific function.
                 let scriptToRun = `
                     "use strict";
-                    // Player's submitted code:
-                    ${playerCodeFunctionItself}
+                    // Player's submitted code (which defines 'functionNameToCall'):
+                    ${playerCodeItself}
 
-                    // Wrapper to call the player's specific function from a generic solve(params)
-                    function solve(params_wrapper) {
+                    // Wrapper to call the player's specific function from a generic solve(params_wrapper)
+                    // This is what 'new Function()' will execute.
+                    // 'params_wrapper' is the 'parsedInput' from the test case.
+                    function solve_wrapper_for_test_runner(params_wrapper_arg) {
                       if (typeof ${functionNameToCall} !== 'function') {
-                        throw new Error('The function "${functionNameToCall}" as defined by the problem signature "${signatureInfo.signature}" is not found or not a function in your code.');
+                        throw new Error('The function "${functionNameToCall}" (expected from problem signature "${signatureInfo.signature}") is not found or not a function in your code. Please ensure it is defined correctly.');
                       }
                       
                       let argsForPlayerFunc;
+                      // Check if the player's function expects parameters
                       if (${functionParamsExpected.length} === 0) {
                           argsForPlayerFunc = [];
-                      } else if (${functionParamsExpected.length} === 1 && (typeof params_wrapper !== 'object' || params_wrapper === null || Array.isArray(params_wrapper) || Object.keys(params_wrapper).length !== functionParamsExpected.length )) {
-                          // Single parameter expected by player's func, and params_wrapper is not an object meant for destructuring, or is an array
-                          argsForPlayerFunc = [params_wrapper];
-                      } else if (typeof params_wrapper === 'object' && params_wrapper !== null && ${functionParamsExpected.length} > 0) {
+                      } 
+                      // If player's function expects a single parameter, and params_wrapper_arg is not an object intended for destructuring
+                      // or it's an array itself, pass params_wrapper_arg directly as the single argument.
+                      else if (${functionParamsExpected.length} === 1 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null || Array.isArray(params_wrapper_arg) || Object.keys(params_wrapper_arg).length !== functionParamsExpected.length )) {
+                          argsForPlayerFunc = [params_wrapper_arg];
+                      } 
+                      // If player's function expects multiple parameters (or one object parameter),
+                      // and params_wrapper_arg is an object, map params_wrapper_arg's properties to arguments.
+                      else if (typeof params_wrapper_arg === 'object' && params_wrapper_arg !== null && ${functionParamsExpected.length} > 0) {
                           argsForPlayerFunc = ${JSON.stringify(functionParamsExpected)}.map(paramName => {
-                            if (params_wrapper.hasOwnProperty(paramName)) {
-                                return params_wrapper[paramName];
+                            if (params_wrapper_arg.hasOwnProperty(paramName)) {
+                                return params_wrapper_arg[paramName];
                             }
-                            console.warn("Parameter '"+paramName+"' not found in test case input params object:", params_wrapper, "Expected params:", ${JSON.stringify(functionParamsExpected)});
-                            // This could be intentional if problem has optional args, but usually indicates mismatch
+                            // This warning is helpful for debugging mismatches
+                            console.warn("Parameter '"+paramName+"' not found in test case input params object:", params_wrapper_arg, "Expected params:", ${JSON.stringify(functionParamsExpected)});
                             return undefined; 
                           });
-                      } else if (${functionParamsExpected.length} > 0 && (typeof params_wrapper !== 'object' || params_wrapper === null)) {
-                           // Multiple params expected, but params_wrapper is not an object
-                           console.error("Mismatch: Expected multiple parameters for ${functionNameToCall}, but test case input 'params_wrapper' is not an object. Input:", params_wrapper);
-                           throw new Error("Test case input structure does not match expected parameters for ${functionNameToCall}. Expected object, got " + (typeof params_wrapper));
+                      } 
+                      // Fallback if multiple params expected but params_wrapper_arg isn't an object, or other mismatches
+                      else if (${functionParamsExpected.length} > 0 && (typeof params_wrapper_arg !== 'object' || params_wrapper_arg === null)) {
+                           console.error("Mismatch: Expected multiple parameters for ${functionNameToCall}, but test case input 'params_wrapper_arg' is not an object. Input:", params_wrapper_arg);
+                           throw new Error("Test case input structure does not match expected parameters for ${functionNameToCall}. Expected an object mapping parameter names to values, but received " + (typeof params_wrapper_arg));
                       }
-                      else { // Fallback for single primitive/array to single arg, or if functionParamsExpected is empty
-                          argsForPlayerFunc = [params_wrapper];
+                      else { 
+                          // Default case or if functionParamsExpected is empty and params_wrapper_arg is simple
+                          argsForPlayerFunc = [params_wrapper_arg];
                       }
                       return ${functionNameToCall}(...argsForPlayerFunc);
                     }
-                    // The 'parsedInput' from the test case is passed as 'params_wrapper' to the 'solve' function
-                    return solve(${JSON.stringify(parsedInput)});
+                    // The 'parsedInput' from the test case is passed as 'params_wrapper_arg'
+                    return solve_wrapper_for_test_runner(${JSON.stringify(parsedInput)});
                 `;
                 
                 let outputFromSolve;
@@ -635,7 +659,6 @@ export default function ArenaPage() {
                   const playerFunctionFactory = new Function(scriptToRun);
                   outputFromSolve = playerFunctionFactory();
                 } catch (solveError: any) {
-                    // Handle errors from player's code execution directly
                     status = 'error';
                     actualOutput = "Execution Error";
                     errorMessage = solveError.message || String(solveError);
@@ -643,29 +666,29 @@ export default function ArenaPage() {
                         testCaseName: tc.name, input: tc.input, expectedOutput: tc.expectedOutput, actualOutput, status, errorMessage,
                         timeTaken: "N/A", memoryUsed: "N/A",
                     });
-                    continue; // Move to the next test case
+                    console.error("Test execution error in player's code:", solveError, "Input:", tc.input);
+                    continue;
                 }
 
-                // If execution successful (no error caught by inner try-catch)
                 actualOutput = outputFromSolve === undefined ? "undefined" : (typeof outputFromSolve === 'object' && outputFromSolve !== null ? JSON.stringify(outputFromSolve) : String(outputFromSolve));
                 
                 let normalizedExpectedOutput = tc.expectedOutput;
                 try { 
-                    const parsedExpected = JSON.parse(tc.expectedOutput); // Try to parse to normalize (e.g. spacing in JSON string)
+                    const parsedExpected = JSON.parse(tc.expectedOutput);
                     normalizedExpectedOutput = JSON.stringify(parsedExpected);
                 } catch (e) { /* not json, use as is */ }
 
                 status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
 
-            } catch (setupError: any) { // This outer catch is for errors in parsing tc.input or other setup before execution
+            } catch (setupError: any) { 
                 status = 'error';
                 actualOutput = "Error during test setup";
-                errorMessage = setupError.message || String(setupError);
-                console.error("Test setup error details:", setupError);
+                errorMessage = `Test setup error: ${setupError.message || String(setupError)}`;
+                console.error("Test setup error details:", setupError, "Input:", tc.input);
             }
         } else { // Python or C++
             status = 'client_unsupported';
-            actualOutput = "N/A";
+            actualOutput = "N/A"; // Simplified from previous verbose message
         }
 
         results.push({
@@ -814,6 +837,16 @@ export default function ArenaPage() {
             icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4" />;
             break;
     }
+    
+    let winningCodeDisplay: { name: string | null; code: string | null } = { name: null, code: null };
+    if (comparisonResult && (comparisonResult.winner === 'player1' || comparisonResult.winner === 'player2')) {
+        if (comparisonResult.winner === 'player1' && player) {
+            winningCodeDisplay = { name: player.username, code: code };
+        } else if (comparisonResult.winner === 'player2' && mockOpponentRef.current) {
+            winningCodeDisplay = { name: mockOpponentRef.current.username, code: opponentCode };
+        }
+    }
+
 
     return (
       <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
@@ -839,7 +872,21 @@ export default function ArenaPage() {
                         <p><span className="font-medium">Reason:</span> {comparisonResult.winningReason}</p>
                         <p><span className="font-medium">Comparison Summary:</span> {comparisonResult.comparisonSummary}</p>
                     </div>
-                    <Accordion type="multiple" className="w-full space-y-2">
+
+                    {winningCodeDisplay.code && winningCodeDisplay.name && (
+                      <div className="mt-4 pt-4 border-t">
+                        <h4 className="font-semibold text-md text-foreground mb-2">
+                          Winning Submission by {winningCodeDisplay.name}:
+                        </h4>
+                        <ScrollArea className="h-40 p-2 border rounded bg-muted/20">
+                          <pre className="whitespace-pre-wrap text-xs">
+                            {winningCodeDisplay.code}
+                          </pre>
+                        </ScrollArea>
+                      </div>
+                    )}
+
+                    <Accordion type="multiple" className="w-full space-y-2 pt-4">
                         <AccordionItem value="player1-eval">
                             <AccordionTrigger className="text-md bg-muted/30 px-3 py-2 rounded hover:no-underline">Your Submission ({player?.username})</AccordionTrigger>
                             <AccordionContent className="p-3 border rounded-b-md text-sm space-y-1">
@@ -1126,6 +1173,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-
     
