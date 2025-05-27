@@ -186,7 +186,7 @@ export default function ArenaPage() {
   };
   
   const handleSubmissionFinalization = useCallback(async () => {
-    if (!player || !question || !currentLobbyDetailsRef.current || !opponentCode) {
+    if (!player || !question || !currentLobbyDetailsRef.current || opponentCode === null) { // Check opponentCode for null explicitly
       toast({ title: "Error", description: "Core game data missing for final comparison.", variant: "destructive" });
       setGameState('gameOver');
       setGameOverReason("error");
@@ -201,7 +201,7 @@ export default function ArenaPage() {
     try {
       const comparisonInput = {
         player1Code: code || "", 
-        player2Code: opponentCode,
+        player2Code: opponentCode, // opponentCode can be "" if they didn't submit
         referenceSolution: question.solution,
         problemStatement: question.problemStatement,
         language: language,
@@ -257,7 +257,7 @@ export default function ArenaPage() {
     try {
       const challenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyInfo.name });
       
-      if (gameStateRef.current !== 'searching') { // Re-check after await
+      if (gameStateRef.current !== 'searching') { 
            console.log("Search cancelled during question fetch.");
             if (player && lobbyInfo) { 
                 const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
@@ -298,12 +298,12 @@ export default function ArenaPage() {
         duration: 7000,
       });
 
-      if (player && lobbyInfo) { // Refund entry fee
+      if (player && lobbyInfo) { 
         const refundedPlayer = { ...player, coins: player.coins + lobbyInfo.entryFee };
         setPlayer(refundedPlayer);
         toast({ title: "Entry Fee Refunded", description: `Your ${lobbyInfo.entryFee} coins have been refunded.`, variant: "default" });
       }
-      resetGameState(true); // Go back to lobby selection
+      resetGameState(true); 
     } finally {
       setIsLoadingQuestion(false);
     }
@@ -344,6 +344,7 @@ export default function ArenaPage() {
     setSelectedLobbyName(lobbyName);
     setCurrentLobbyDetails(lobbyInfo);
     setGameState('searching');
+    setTestResults([]); // Clear test results from previous game
 
     const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); 
     const mockOpponentDetails: Player = {
@@ -355,6 +356,7 @@ export default function ArenaPage() {
       avatarUrl: `https://placehold.co/40x40.png?text=DB`
     };
 
+    // Mock matchmaking delay
     setTimeout(() => {
       if (gameStateRef.current === 'searching') { 
         setMockOpponent(mockOpponentDetails);
@@ -362,7 +364,6 @@ export default function ArenaPage() {
         fetchQuestionForLobby(lobbyInfo);
       } else {
         console.log("Matchmaking timeout fired, but user already left 'searching' state.");
-        // Refund logic is handled if search is cancelled explicitly or if fetchQuestionForLobby detects cancellation
       }
     }, 1500 + Math.random() * 1000); 
   };
@@ -383,7 +384,7 @@ export default function ArenaPage() {
     setPlayerHasSubmittedCode(true);
     toast({title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground"});
 
-    if (opponentHasSubmittedCode) {
+    if (opponentHasSubmittedCodeRef.current) { // Use ref for immediate state
       handleSubmissionFinalization();
     }
   };
@@ -397,18 +398,18 @@ export default function ArenaPage() {
       variant: "destructive",
     });
 
-    if (playerHasSubmittedCode && opponentHasSubmittedCode) {
+    if (playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
       setGameOverReason("timeup_both_submitted");
       handleSubmissionFinalization();
-    } else if (playerHasSubmittedCode && !opponentHasSubmittedCode) {
+    } else if (playerHasSubmittedCodeRef.current && !opponentHasSubmittedCodeRef.current) {
       setGameOverReason("timeup_player1_submitted_only");
-      setOpponentCode(""); // Ensure opponent code is empty for fair comparison if they didn't submit
+      setOpponentCode(""); 
       handleSubmissionFinalization(); 
-    } else if (!playerHasSubmittedCode && opponentHasSubmittedCode) {
+    } else if (!playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
       setGameOverReason("timeup_player2_submitted_only");
       setCode(''); 
       handleSubmissionFinalization(); 
-    } else {
+    } else { // Neither submitted
       setGameOverReason("timeup_neither_submitted");
       setGameState('gameOver'); 
     }
@@ -420,13 +421,13 @@ export default function ArenaPage() {
     const lobbyFee = currentLobbyDetailsRef.current?.entryFee || 0;
 
     if (leaveConfirmType === 'search') {
-        if (player) { // Fee already deducted. Forfeiture confirmed.
+        if (player) { 
              toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${lobbyFee} coins was forfeited.`, variant: "default" });
         }
         resetGameState(true); 
-        setGameOverReason("cancelledSearch"); // Set this to prevent game over screen from showing error message
+        setGameOverReason("cancelledSearch"); 
     } else if (leaveConfirmType === 'game') {
-        if (player) { // Fee already deducted.
+        if (player) { 
              toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${lobbyFee} coins was lost.`, variant: "destructive" });
         }
         setGameOverReason("forfeit_player1");
@@ -443,81 +444,112 @@ export default function ArenaPage() {
   const getCodePlaceholder = (selectedLang: SupportedLanguage): string => {
     const difficultyText = question?.difficulty || 'N/A';
     const lobbyNameText = currentLobbyDetailsRef.current?.name || 'N/A';
-    const problemStatementSubstr = question?.problemStatement.substring(0,50) || 'N/A';
+    
+    // Extract problem title or a short summary if possible, otherwise use a generic placeholder
+    const problemHint = question?.problemStatement ? question.problemStatement.split('\n')[0].substring(0, 60) + "..." : "Challenge problem";
 
     switch (selectedLang) {
       case 'javascript':
         return `// Language: JavaScript
-// Difficulty: ${difficultyText} (Lobby: ${lobbyNameText})
-// Problem: ${problemStatementSubstr}...
+// Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
+// Problem: ${problemHint}
 
+/**
+ * IMPORTANT: Your solution MUST be within a function named 'solve'.
+ * This function will receive a single argument 'params'.
+ * 
+ * If the test case input is a simple value (e.g., a number 5, a string "hello"),
+ * 'params' will be that value directly (e.g., params = 5).
+ * 
+ * If the test case input is a complex structure (e.g., an object like {"arr": [1,2,3], "k": 2} or an array [1,2,3]),
+ * 'params' will be the JavaScript object/array parsed from the JSON string input.
+ * You can then destructure or access properties from 'params' as needed.
+ * Example for object input: const { arr, k } = params;
+ * Example for array input: const firstElement = params[0];
+ */
 function solve(params) {
   // Your brilliant JavaScript code here!
-  // Example: const n = params; // if input is a single value
-  // Example: const { data_array, target_value } = params; // if input is an object
-  // let result = 0;
-  /* ... your logic ... */
+  // Remember to return the result as per the problem's output specification.
+  // Example:
+  // if (typeof params === 'number') {
+  //   return params * 2; // If input is a number
+  // } else if (Array.isArray(params)) {
+  //   return params.length; // If input is an array
+  // } else if (typeof params === 'object' && params !== null) {
+  //   // const { someProperty } = params;
+  //   // return someProperty; // If input is an object
+  // }
+  let result;
+  // ... your logic ...
   return result;
 }
-
-// Ensure your 'solve' function can handle various input types based on the problem.
-// For complex inputs (objects/arrays), 'params' will be the parsed JSON from test cases.
-// For simple inputs (numbers/strings), 'params' will be the direct value.
 `;
       case 'python':
         return `# Language: Python
-# Difficulty: ${difficultyText} (Lobby: ${lobbyNameText})
-# Problem: ${problemStatementSubstr}...
+# Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
+# Problem: ${problemHint}
+
+# IMPORTANT: Your solution MUST be within a function named 'solve'.
+# This function will receive a single argument 'params'.
+#
+# If the test case input is a simple value (e.g., an integer 5, a string "hello"),
+# 'params' will be that value directly (e.g., params = 5).
+#
+# If the test case input is a complex structure (e.g., a JSON object like {"arr": [1,2,3], "k": 2} or a JSON array [1,2,3]),
+# 'params' will be the Python dictionary or list parsed from the JSON string input.
+# You can then access elements or keys from 'params' as needed.
+# Example for dictionary input: arr = params.get("arr")
+# Example for list input: first_element = params[0]
 
 def solve(params):
   # Your brilliant Python code here!
-  # Example: n = params # if input is a single value
-  # Example: data_array = params.get('data_array') # if input is a dictionary (parsed from JSON)
-  # result = 0
+  # Remember to return the result as per the problem's output specification.
+  result = None
   # ... your logic ...
   return result
-
-# Ensure your 'solve' function can handle various input types.
-# For complex inputs (objects/arrays from JSON), 'params' will be a Python dict or list.
-# For simple inputs, 'params' will be the direct value.
 `;
       case 'cpp':
         return `// Language: C++
-// Difficulty: ${difficultyText} (Lobby: ${lobbyNameText})
-// Problem: ${problemStatementSubstr}...
+// Lobby: ${lobbyNameText} (Difficulty: ${difficultyText})
+// Problem: ${problemHint}
 
 #include <iostream>
 #include <vector>
 #include <string>
-// Add other necessary headers.
-// If using JSON, you might need a library like nlohmann/json.hpp (not included in this basic setup).
+// Add other necessary headers. For JSON parsing, you might need a library like nlohmann/json.hpp (not directly runnable in client-side tests).
 
-// The AI will look for a main problem-solving function or logic.
-// For simple competitive programming, you might read from std::cin in main.
-// For evaluation in this system, try to encapsulate logic in a callable form if possible,
-// though the AI will analyze the provided C++ code block.
+// For C++, the AI evaluation will look for your main problem-solving logic.
+// Client-side testing for C++ is not supported.
+// Structure your code to be understandable by the AI evaluator.
+// Typically, competitive programming solutions read from std::cin and print to std::cout.
 
-// Example (conceptual, actual signature depends on problem):
-// auto solve(/* appropriate C++ type for params, or parse from string */) {
-//    // ... your logic ...
-//    return result;
-// }
+// Example conceptual structure (adapt to problem specifics):
+/*
+  // If the problem implies a function, you can define it:
+  return_type solve( /* appropriate C++ type(s) for parameters */ ) {
+      // ... your logic ...
+      return result;
+  }
 
-int main() {
-  // Example: Read input, call solve, print output
-  // std::string input_str;
-  // std::getline(std::cin, input_str); 
-  // // Parse input_str if needed, then call your solution logic
-  // // auto result = solve(parsed_input);
-  // // std::cout << result << std::endl;
-  return 0;
-}
+  int main() {
+    // 1. Read input (e.g., from std::cin)
+    //    You might need to parse complex inputs if they are given as strings.
+    
+    // 2. Call your solving logic
+    //    auto result = solve(parsed_input_data);
 
-// The AI will evaluate your primary C++ problem-solving logic.
-// For test cases, ensure your main() or a similar entry point handles I/O as expected by the problem.
+    // 3. Print output (e.g., to std::cout)
+    //    std::cout << result << std::endl;
+    
+    return 0;
+  }
+*/
+
+// Ensure your complete C++ solution is within this text area.
+// The AI will attempt to understand and evaluate it based on the problem.
 `;
       default:
-        return "// Select a language to see a placeholder.";
+        return "// Select a language to see a placeholder. Your main solution function for JavaScript/Python should be named 'solve(params)'.";
     }
   };
 
@@ -536,54 +568,57 @@ int main() {
 
         if (language === 'javascript') {
             try {
+                // Ensure the player's code is properly isolated and the 'solve' function is accessible.
                 const playerFunctionFactory = new Function(`
                     "use strict";
                     ${code}
                     if (typeof solve !== 'function') {
-                        throw new Error('The "solve" function is not defined in your code.');
+                        throw new Error('The "solve" function is not defined or not a function in your code. Please ensure your main logic is in a function named "solve(params)".');
                     }
                     return solve;
                 `);
                 const playerSolveFunction = playerFunctionFactory();
-
-                if (typeof playerSolveFunction !== 'function') {
-                     throw new Error('The "solve" function is not defined or not a function in your code.');
-                }
-
-                let parsedInput = tc.input;
+                
+                let parsedInput = tc.input; // Assume tc.input is a string
                 try {
+                    // Attempt to parse if it looks like JSON, otherwise use as a string (for primitive inputs like '5' or '"hello"')
                     if ((tc.input.startsWith('{') && tc.input.endsWith('}')) || (tc.input.startsWith('[') && tc.input.endsWith(']'))) {
                         parsedInput = JSON.parse(tc.input);
+                    } else if (!isNaN(Number(tc.input))) { // Check if it's a plain number string
+                        // parsedInput = Number(tc.input); // Let solve function handle it as string or convert if needed
                     }
                 } catch (e) {
-                    // Input is not JSON or invalid JSON, use as string
+                    // Parsing failed, or it's not JSON. Use tc.input as is.
+                    // The 'solve' function should be robust enough to handle this based on problem spec.
+                    console.warn("Test case input was not valid JSON, passing as string: ", tc.input);
                 }
                 
                 let outputFromSolve;
                 try {
                     outputFromSolve = playerSolveFunction(parsedInput);
                 } catch (solveError: any) {
-                    throw new Error(`Error in your solve function: ${solveError.message || String(solveError)}`);
+                    // This catches errors specifically from the player's solve function execution
+                    throw new Error(`Error during execution of your 'solve' function: ${solveError.message || String(solveError)}`);
                 }
                 
                 actualOutput = typeof outputFromSolve === 'object' ? JSON.stringify(outputFromSolve) : String(outputFromSolve);
 
                 let normalizedExpectedOutput = tc.expectedOutput;
-                 try {
+                try { // Normalize expected output by parsing and re-stringifying if it's JSON
                     const parsedExpected = JSON.parse(tc.expectedOutput);
-                    normalizedExpectedOutput = JSON.stringify(parsedExpected);
-                } catch (e) { /* not json, use as is */ }
+                    normalizedExpectedOutput = JSON.stringify(parsedExpected); 
+                } catch (e) { /* not json, use as is for comparison */ }
 
                 status = actualOutput === normalizedExpectedOutput ? 'pass' : 'fail';
 
             } catch (error: any) { 
                 status = 'error';
-                actualOutput = "Error during execution";
-                errorMessage = error.message || String(error);
+                actualOutput = "Error during test execution";
+                errorMessage = error.message || String(error); // Capture the (potentially re-thrown) error message
             }
         } else {
             status = 'client_unsupported';
-            actualOutput = `Client-side test for ${language} not supported. Submit for AI eval.`;
+            actualOutput = `Client-side test for ${language.toUpperCase()} not supported. Submit for AI eval.`;
         }
 
         results.push({
@@ -790,7 +825,7 @@ int main() {
             <div className="text-center text-muted-foreground">
                 Your coins: {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>
             </div>
-            <Button onClick={() => { resetGameState(true); setGameOverReason("error"); /* Reset reason for next game */ }} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+            <Button onClick={() => { resetGameState(true); setGameOverReason("error"); }} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
              Play Again (Back to Lobbies)
             </Button>
           </CardContent>
@@ -1045,5 +1080,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
