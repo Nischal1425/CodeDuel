@@ -9,6 +9,11 @@ export interface Player {
   rating: number;
   avatarUrl?: string;
   unlockedAchievements: string[];
+  // New stats for achievements
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  winStreak: number;
 }
 
 export interface Question {
@@ -59,4 +64,13 @@ export interface Achievement {
   name: string;
   description: string;
   icon: ElementType;
+  // New fields for logic and progress tracking
+  type: 'boolean' | 'counter';
+  // The player stat to track for this achievement. 'null' for achievements not tied to a single stat (e.g. win in hard lobby).
+  stat: keyof Player | null; 
+  goal: number; // The target value for 'counter' type or 1 for 'boolean' types tied to a stat.
+  reward?: {
+    type: 'coins';
+    amount: number;
+  };
 }

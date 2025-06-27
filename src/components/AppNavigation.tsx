@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation'; // Added useRouter
-import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion } from 'lucide-react';
+import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award } from 'lucide-react';
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -15,6 +15,7 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: Home }, // Updated href
   { href: '/arena', label: 'Arena', icon: Swords },
   { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
+  { href: '/achievements', label: 'Achievements', icon: Award },
   { href: '/profile', label: 'Profile', icon: UserCircle },
   { href: '/buy-coins', label: 'Buy Coins', icon: DollarSign },
   { href: '/cooldown-challenge', label: 'Cooldown Challenge', icon: ShieldQuestion },
@@ -36,7 +37,7 @@ export function AppNavigation() {
         <SidebarMenuItem key={item.href}>
           <Link href={item.href} passHref legacyBehavior>
             <SidebarMenuButton
-              isActive={pathname === item.href || (item.href === '/dashboard' && pathname.startsWith('/(app)/dashboard'))} // Handle route group for dashboard active state
+              isActive={pathname.startsWith(item.href)}
               tooltip={{ children: item.label, side: 'right', className: 'bg-popover text-popover-foreground' }}
               className="justify-start"
             >

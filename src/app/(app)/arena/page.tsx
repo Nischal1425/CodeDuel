@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info } from 'lucide-react';
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info, Award } from 'lucide-react';
 import type { GenerateCodingChallengeOutput, TestCase } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
@@ -26,6 +26,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
+import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 
 
 const DEFAULT_LANGUAGE = "javascript";
@@ -198,14 +199,38 @@ export default function ArenaPage() {
     }
   };
 
+  const showAchievementToast = useCallback((achievement) => {
+    toast({
+        title: (
+            <div className="flex items-center gap-2">
+                <Award className="h-6 w-6 text-yellow-400" />
+                <span className="font-semibold">Achievement Unlocked!</span>
+            </div>
+        ),
+        description: (
+            <div>
+                <p className="font-medium text-lg">{achievement.name}</p>
+                {achievement.reward && (
+                    <p className="mt-1 text-sm text-green-500 font-bold flex items-center gap-1">
+                        + {achievement.reward.amount} <CoinsIcon className="h-4 w-4" />
+                    </p>
+                )}
+            </div>
+        ),
+        duration: 8000,
+        className: "bg-accent text-accent-foreground border-yellow-400",
+    });
+  }, [toast]);
+
  const handleSubmissionFinalization = useCallback(async () => {
     const currentQuestion = questionRef.current;
     const currentOpponentCode = opponentCodeRef.current;
     const currentCode = codeRef.current;
     const currentLanguage = languageRef.current;
     const lobbyDetails = currentLobbyDetailsRef.current;
+    const opponent = mockOpponentRef.current;
 
-    if (!player || !currentQuestion || !lobbyDetails || currentOpponentCode === null) {
+    if (!player || !currentQuestion || !lobbyDetails || currentOpponentCode === null || !opponent) {
       toast({ title: "Error", description: "Core game data missing for final comparison.", variant: "destructive" });
       setGameState('gameOver');
       setGameOverReason("error");
@@ -228,37 +253,68 @@ export default function ArenaPage() {
       };
       const result = await compareCodeSubmissions(comparisonInput);
       setComparisonResult(result);
-
-      let finalPlayer = player;
+      
       const entryFee = lobbyDetails.entryFee;
+      let reason: GameOverReason = "comparison_draw";
+      let toastTitle = "Draw!";
+      let toastDesc = `The duel ended in a draw. Your entry fee of ${entryFee} coins has been refunded.`;
+      let toastVariant: "default" | "destructive" = "default";
+      let wonMatch = false;
 
+      if (result.winner === 'player1') {
+        reason = "comparison_player1_wins";
+        const totalPot = entryFee * 2;
+        const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
+        const winningsPaidOut = totalPot - commissionAmount;
+        toastTitle = "Victory!";
+        toastDesc = `You won the duel! ${winningsPaidOut} coins awarded.`;
+        toastVariant = "default";
+        wonMatch = true;
+      } else if (result.winner === 'player2') {
+        reason = "comparison_player2_wins";
+        toastTitle = "Defeat";
+        toastDesc = "Your opponent's solution was deemed superior.";
+        toastVariant = "destructive";
+        wonMatch = false;
+      }
+      
+      const achievementResult = checkAchievementsOnMatchEnd(player, {
+          won: wonMatch,
+          opponentRank: opponent.rank,
+          lobbyDifficulty: lobbyDetails.name,
+      });
+
+      // Apply winnings/losses to the stat-updated player object
+      let finalPlayer = achievementResult.updatedPlayer;
       if (result.winner === 'player1') {
         const totalPot = entryFee * 2;
         const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
         const winningsPaidOut = totalPot - commissionAmount;
-        finalPlayer = { ...player, coins: player.coins + winningsPaidOut };
-        setPlayer(finalPlayer);
-        setGameOverReason("comparison_player1_wins");
-        toast({ title: "Victory!", description: `You won the duel! ${winningsPaidOut} coins awarded.`, className: "bg-green-500 text-white", duration: 7000 });
+        finalPlayer = { ...finalPlayer, coins: finalPlayer.coins + winningsPaidOut };
       } else if (result.winner === 'player2') {
-        setGameOverReason("comparison_player2_wins");
-        toast({ title: "Defeat", description: "Your opponent's solution was deemed superior.", variant: "destructive", duration: 7000 });
+        // Entry fee already deducted, no change.
       } else { // Draw
-        finalPlayer = { ...player, coins: player.coins + entryFee }; // Refund entry fee
-        setPlayer(finalPlayer);
-        setGameOverReason("comparison_draw");
-        toast({ title: "Draw!", description: `The duel ended in a draw. Your entry fee of ${entryFee} coins has been refunded.`, variant: "default", duration: 7000 });
+        finalPlayer = { ...finalPlayer, coins: finalPlayer.coins + entryFee };
       }
+      
+      setPlayer(finalPlayer);
+      setGameOverReason(reason);
+      toast({ title: toastTitle, description: toastDesc, variant: toastVariant, duration: 7000 });
+      
+      achievementResult.newlyUnlocked.forEach(ach => {
+        showAchievementToast(ach);
+      });
+
     } catch (error) {
       console.error("Error during code comparison:", error);
       toast({ title: "Comparison Error", description: "Could not compare submissions. Please try again.", variant: "destructive" });
       setComparisonResult(null);
-      setGameOverReason("comparison_failed"); // Use specific reason
+      setGameOverReason("comparison_failed");
     } finally {
       setIsComparing(false);
       setGameState('gameOver');
     }
-  }, [player, setPlayer, toast ]);
+  }, [player, setPlayer, toast, showAchievementToast]);
 
 
   const fetchQuestionForLobby = useCallback(async (lobbyInfo: LobbyInfo) => {
@@ -371,14 +427,19 @@ export default function ArenaPage() {
     setGameState('searching');
     setTestResults([]); 
 
-    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 5) - 2); 
+    const opponentRank = Math.max(1, player.rank + Math.floor(Math.random() * 10) - 5); 
     const mockOpponentDetails: Player = {
       id: `bot_${Date.now()}`,
       username: `DuelBot${Math.floor(Math.random() * 1000)}`,
       coins: Math.floor(Math.random() * 5000) + 500,
       rank: opponentRank,
       rating: opponentRank * 75 + Math.floor(Math.random() * 100),
-      avatarUrl: `https://placehold.co/40x40.png?text=DB`
+      avatarUrl: `https://placehold.co/40x40.png?text=DB`,
+      unlockedAchievements: [],
+      matchesPlayed: Math.floor(Math.random() * 200),
+      wins: Math.floor(Math.random() * 100),
+      losses: Math.floor(Math.random() * 100),
+      winStreak: Math.floor(Math.random() * 5),
     };
 
     setTimeout(() => {
@@ -416,7 +477,7 @@ export default function ArenaPage() {
   };
 
   const handleTimeUp = () => {
-    if (!player || !currentLobbyDetailsRef.current || gameStateRef.current !== 'inGame') return;
+    if (!player || !currentLobbyDetailsRef.current || !mockOpponentRef.current || gameStateRef.current !== 'inGame') return;
 
     toast({
       title: "Time's Up!",
@@ -430,26 +491,37 @@ export default function ArenaPage() {
     }
 
     const entryFee = currentLobbyDetailsRef.current.entryFee;
+    const opponent = mockOpponentRef.current;
+    const lobbyDetails = currentLobbyDetailsRef.current;
 
     if (playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
       setGameOverReason("timeup_both_submitted");
       handleSubmissionFinalization();
     } else if (playerHasSubmittedCodeRef.current && !opponentHasSubmittedCodeRef.current) {
-      setGameOverReason("opponent_failed_to_submit_player_wins");
+      const achievementResult = checkAchievementsOnMatchEnd(player, { won: true, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
       const totalPot = entryFee * 2;
       const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
       const winningsPaidOut = totalPot - commissionAmount;
-      const finalPlayer = { ...player, coins: player.coins + winningsPaidOut };
+      const finalPlayer = { ...achievementResult.updatedPlayer, coins: achievementResult.updatedPlayer.coins + winningsPaidOut };
+      
       setPlayer(finalPlayer);
+      setGameOverReason("opponent_failed_to_submit_player_wins");
       toast({ title: "Victory!", description: `Opponent failed to submit in time. You won ${winningsPaidOut} coins.`, className: "bg-green-500 text-white", duration: 7000 });
+      achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
       setGameState('gameOver');
     } else if (!playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
+      const achievementResult = checkAchievementsOnMatchEnd(player, { won: false, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
+
+      setPlayer(achievementResult.updatedPlayer);
       setGameOverReason("player_failed_to_submit_opponent_wins");
-      // Player already paid entry fee, no change to coins on loss here as it's a loss
       toast({ title: "Defeat", description: `You failed to submit in time after your opponent. Entry fee lost.`, variant: "destructive", duration: 7000 });
+      achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
       setGameState('gameOver');
     } else { // Neither submitted
+      const achievementResult = checkAchievementsOnMatchEnd(player, { won: false, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
+      setPlayer(achievementResult.updatedPlayer);
       setGameOverReason("timeup_neither_submitted");
+      achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
       setGameState('gameOver'); 
     }
   };
@@ -457,18 +529,27 @@ export default function ArenaPage() {
 
   const handleLeaveConfirm = () => {
     setShowLeaveConfirm(false);
-    const lobbyFee = currentLobbyDetailsRef.current?.entryFee || 0;
+    const lobbyDetails = currentLobbyDetailsRef.current;
+    const opponent = mockOpponentRef.current;
+
+    if (!player || !lobbyDetails) {
+        resetGameState(true);
+        return;
+    }
+
+    const fee = lobbyDetails.entryFee;
 
     if (leaveConfirmType === 'search') {
-        if (player) {
-             toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${lobbyFee} coins was forfeited.`, variant: "default" });
-        }
+        const updatedPlayer = { ...player, coins: player.coins + fee }; // Refund fee, then forfeit
+        setPlayer({ ...updatedPlayer, coins: updatedPlayer.coins - fee }); // Forfeit
+        toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${fee} coins was forfeited.`, variant: "default" });
         resetGameState(true);
         setGameOverReason("cancelledSearch"); 
-    } else if (leaveConfirmType === 'game') {
-        if (player) {
-             toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${lobbyFee} coins was lost.`, variant: "destructive" });
-        }
+    } else if (leaveConfirmType === 'game' && opponent) {
+        const achievementResult = checkAchievementsOnMatchEnd(player, { won: false, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
+        setPlayer(achievementResult.updatedPlayer);
+        toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${fee} coins was lost.`, variant: "destructive" });
+        achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
         setGameOverReason("forfeit_player1");
         setGameState('gameOver'); 
     }
@@ -1199,5 +1280,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
