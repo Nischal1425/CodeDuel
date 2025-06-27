@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState } from 'react';
@@ -8,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
-import { DollarSign, Gift, History, Loader2, Mail, User, Edit3, ShieldAlert, Award, Sparkles, Image as ImageIcon } from 'lucide-react';
+import { DollarSign, Gift, History, Loader2, Mail, User, Edit3, ShieldAlert, Award, Sparkles, Image as ImageIcon, ShieldCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
@@ -94,7 +93,21 @@ export default function ProfilePage() {
             <AvatarImage src={player.avatarUrl || `https://placehold.co/128x128.png?text=${player.username.substring(0,1)}`} alt={player.username} data-ai-hint="user avatar placeholder" />
             <AvatarFallback className="text-4xl">{player.username.substring(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
-          <CardTitle className="text-4xl font-bold text-accent">{player.username}</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-4xl font-bold text-accent">{player.username}</CardTitle>
+            {player.isKycVerified && (
+                <TooltipProvider>
+                    <Tooltip>
+                        <TooltipTrigger>
+                            <ShieldCheck className="h-7 w-7 text-green-500" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>KYC Verified Player</p>
+                        </TooltipContent>
+                    </Tooltip>
+                </TooltipProvider>
+            )}
+          </div>
           <CardDescription className="text-lg text-muted-foreground">Level {player.rank} Duelist</CardDescription>
         </CardHeader>
         <CardContent className="p-6 space-y-6">
@@ -165,9 +178,17 @@ export default function ProfilePage() {
               <Button variant="outline" className="w-full justify-start" disabled>
                 <History className="mr-2 h-4 w-4" /> Match History (Soon)
               </Button>
-               <Button variant="outline" className="w-full justify-start" disabled>
-                <ShieldAlert className="mr-2 h-4 w-4" /> KYC Verification (Soon)
-              </Button>
+              {player.isKycVerified ? (
+                <Button variant="outline" className="w-full justify-start text-green-600 border-green-500" disabled>
+                    <ShieldCheck className="mr-2 h-4 w-4" /> Verified
+                </Button>
+                ) : (
+                <Link href="/kyc" passHref legacyBehavior>
+                    <Button asChild variant="outline" className="w-full justify-start">
+                        <a><ShieldAlert className="mr-2 h-4 w-4" /> KYC Verification</a>
+                    </Button>
+                </Link>
+             )}
             </div>
           </section>
 
@@ -240,14 +261,17 @@ export default function ProfilePage() {
                  <Card className="bg-secondary/30">
                     <CardHeader>
                         <CardTitle className="text-lg flex items-center"><Gift className="mr-2 h-5 w-5 text-blue-500"/>Redeem Coins</CardTitle>
-                        <CardDescription>Withdraw your winnings (Feature coming soon).</CardDescription>
+                        <CardDescription>Withdraw your winnings after KYC.</CardDescription>
                     </CardHeader>
                      <CardContent>
-                        <Label htmlFor="redeem-amount">Amount (Coins)</Label>
-                        <Input id="redeem-amount" type="number" placeholder="e.g., 10000 coins" className="mt-1" disabled />
+                        <p className="text-sm text-muted-foreground">Once your account is KYC verified, you can redeem your coins.</p>
                     </CardContent>
                     <CardFooter>
-                        <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white" disabled>Redeem Coins (Soon)</Button>
+                       <Link href="/redeem" passHref legacyBehavior>
+                            <Button asChild className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                               <a>Redeem Coins</a>
+                            </Button>
+                        </Link>
                     </CardFooter>
                 </Card>
             </div>
@@ -275,5 +299,3 @@ function InfoItem({ icon, label, value }: InfoItemProps) {
     </div>
   );
 }
-
-    

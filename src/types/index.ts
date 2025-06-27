@@ -14,6 +14,8 @@ export interface Player {
   wins: number;
   losses: number;
   winStreak: number;
+  // New field for Pro Circuit
+  isKycVerified: boolean;
 }
 
 export interface Question {

@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -48,6 +47,7 @@ export default function LandingPage() {
       wins: 15,
       losses: 10,
       winStreak: 3,
+      isKycVerified: false,
     });
     setIsLoggingIn(false);
     router.push('/dashboard');
