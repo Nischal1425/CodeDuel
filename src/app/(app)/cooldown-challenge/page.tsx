@@ -19,7 +19,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 
 const COOLDOWN_DURATION_HOURS = 3;
-const COOLDOWN_REWARD_COINS = 50; // Same as easy lobby entry for now
+const COOLDOWN_REWARD_COINS = 50;
+const ELIGIBILITY_COIN_THRESHOLD = 50;
 
 export default function CooldownChallengePage() {
   const { toast } = useToast();
@@ -28,7 +29,6 @@ export default function CooldownChallengePage() {
   const [code, setCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionEvaluation, setSubmissionEvaluation] = useState<EvaluateCodeSubmissionOutput | null>(null);
-  const [submissionOutcome, setSubmissionOutcome] = useState<"success" | "failure" | null>(null);
   
   const [timeCooldownActive, setTimeCooldownActive] = useState(false);
   const [cooldownTimeLeft, setCooldownTimeLeft] = useState("");
@@ -37,15 +37,6 @@ export default function CooldownChallengePage() {
   const [isLoadingChallenge, setIsLoadingChallenge] = useState(false);
   const [errorLoadingChallenge, setErrorLoadingChallenge] = useState<string | null>(null);
 
-  const resetChallengeState = () => {
-    setCode("");
-    setIsSubmitting(false);
-    setSubmissionEvaluation(null);
-    setSubmissionOutcome(null);
-    // Keep timeCooldownActive and cooldownTimeLeft as they are managed by timer
-    // Keep challenge, isLoadingChallenge, errorLoadingChallenge to allow retry or display existing if navigated away and back
-  };
-  
   const fetchCooldownChallenge = useCallback(async () => {
     if (!player) return;
 
@@ -53,12 +44,15 @@ export default function CooldownChallengePage() {
     setErrorLoadingChallenge(null);
     setChallenge(null); // Clear previous challenge
     setSubmissionEvaluation(null);
-    setSubmissionOutcome(null);
     setCode("");
 
     try {
       const newChallenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: 'easy' });
       setChallenge(newChallenge);
+      if (newChallenge.functionSignature) {
+        // A simple placeholder generation, actual editor would be more complex
+        setCode(`function solve() {\n  // Your code here\n}`);
+      }
     } catch (error) {
       console.error("Failed to generate cooldown challenge:", error);
       setErrorLoadingChallenge("Failed to load challenge. Please try again.");
@@ -75,14 +69,12 @@ export default function CooldownChallengePage() {
   useEffect(() => {
     if (authLoading || !player) return;
 
-    if (player.coins > 0) {
-      // Player has coins, cooldown challenge is not for them
-      setTimeCooldownActive(false); // Ensure no time cooldown shows
-      setChallenge(null); // Clear any potential challenge data
+    if (player.coins >= ELIGIBILITY_COIN_THRESHOLD) {
+      setTimeCooldownActive(false);
+      setChallenge(null);
       return;
     }
 
-    // Player has 0 coins, check for time-based cooldown
     const lastChallengeTimestamp = localStorage.getItem('lastCooldownChallengeTimestamp');
     if (lastChallengeTimestamp) {
       const lastTime = parseInt(lastChallengeTimestamp, 10);
@@ -96,7 +88,7 @@ export default function CooldownChallengePage() {
           if (timeLeftMs <= 0) {
             setTimeCooldownActive(false);
             localStorage.removeItem('lastCooldownChallengeTimestamp');
-            if (player && player.coins <= 0) fetchCooldownChallenge(); // Fetch new challenge if eligible
+            if (player && player.coins < ELIGIBILITY_COIN_THRESHOLD) fetchCooldownChallenge();
             clearInterval(intervalId);
             return;
           }
@@ -111,12 +103,11 @@ export default function CooldownChallengePage() {
       } else {
         localStorage.removeItem('lastCooldownChallengeTimestamp');
         setTimeCooldownActive(false);
-        if (player && player.coins <= 0) fetchCooldownChallenge(); // Fetch if eligible and cooldown expired
+        if (player.coins < ELIGIBILITY_COIN_THRESHOLD) fetchCooldownChallenge();
       }
     } else {
-      // No timestamp, means eligible for a challenge if coins are 0
       setTimeCooldownActive(false);
-      if (player && player.coins <= 0) fetchCooldownChallenge();
+      if (player.coins < ELIGIBILITY_COIN_THRESHOLD) fetchCooldownChallenge();
     }
   }, [authLoading, player, fetchCooldownChallenge]);
 
@@ -130,7 +121,6 @@ export default function CooldownChallengePage() {
 
     setIsSubmitting(true);
     setSubmissionEvaluation(null);
-    setSubmissionOutcome(null);
 
     try {
       const evaluation = await evaluateCodeSubmission({
@@ -143,7 +133,6 @@ export default function CooldownChallengePage() {
       setSubmissionEvaluation(evaluation);
 
       if (evaluation.isPotentiallyCorrect) {
-        setSubmissionOutcome("success");
         const updatedPlayer = { ...player, coins: player.coins + COOLDOWN_REWARD_COINS };
         setPlayer(updatedPlayer);
         
@@ -153,19 +142,17 @@ export default function CooldownChallengePage() {
           className: "bg-green-500 text-white",
         });
         localStorage.setItem('lastCooldownChallengeTimestamp', Date.now().toString());
-        setTimeCooldownActive(true); // Immediately start showing cooldown timer
-        setChallenge(null); // Clear the current challenge as it's completed
+        setTimeCooldownActive(true);
+        setChallenge(null); 
       } else {
-        setSubmissionOutcome("failure");
         toast({
           title: "Incorrect Solution",
-          description: "The AI assessed your solution as incorrect. See feedback below.",
+          description: "The AI assessed your solution as incorrect. See feedback below and try again.",
           variant: "destructive",
         });
       }
     } catch (error) {
       console.error("Error evaluating cooldown submission:", error);
-      setSubmissionOutcome("failure");
       toast({
         title: "Evaluation Error",
         description: "Could not evaluate your submission. Please try again.",
@@ -185,11 +172,10 @@ export default function CooldownChallengePage() {
   }
 
   if (!player) {
-    // Should be handled by layout, but as a fallback
     return <div className="text-center py-10">Loading player data...</div>;
   }
 
-  if (player.coins > 0) {
+  if (player.coins >= ELIGIBILITY_COIN_THRESHOLD) {
     return (
         <div className="container mx-auto max-w-2xl py-8 text-center">
             <Card className="shadow-lg border-accent/20">
@@ -199,7 +185,7 @@ export default function CooldownChallengePage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <p className="text-lg text-muted-foreground">
-                        This challenge is only available when you have 0 coins.
+                        This challenge is only available when you have less than {ELIGIBILITY_COIN_THRESHOLD} coins.
                     </p>
                     <p className="text-md">
                         You currently have {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>.
@@ -208,7 +194,7 @@ export default function CooldownChallengePage() {
                         <Info className="h-5 w-5 text-primary" />
                         <AlertTitle className="text-primary">Ready for Action?</AlertTitle>
                         <AlertDescription className="text-primary/90">
-                           Since you have coins, head over to the Arena to test your skills!
+                           Since you have enough coins, head over to the Arena to test your skills!
                         </AlertDescription>
                     </Alert>
                     <Button asChild className="bg-primary hover:bg-primary/90 text-primary-foreground">
@@ -230,7 +216,7 @@ export default function CooldownChallengePage() {
                 </CardHeader>
                 <CardContent>
                     <p className="text-lg text-muted-foreground mb-2">
-                        You've recently attempted the cooldown challenge.
+                        You've recently completed a cooldown challenge.
                     </p>
                     <p className="text-2xl font-semibold text-accent mb-6">
                         Next free challenge in: {cooldownTimeLeft || "Calculating..."}
@@ -239,7 +225,7 @@ export default function CooldownChallengePage() {
                         <Info className="h-4 w-4" />
                         <AlertTitle>How Cooldown Works</AlertTitle>
                         <AlertDescription>
-                            If you run out of coins, you get one free challenge every {COOLDOWN_DURATION_HOURS} hours.
+                            If you run low on coins, you get one free challenge every {COOLDOWN_DURATION_HOURS} hours.
                             Solve it correctly to earn {COOLDOWN_REWARD_COINS} coins and get back into the game!
                         </AlertDescription>
                     </Alert>
@@ -279,7 +265,7 @@ export default function CooldownChallengePage() {
   }
 
   if (!challenge) {
-     return ( // Fallback if no challenge, no error, not loading - should ideally not be hit if logic is correct
+     return (
         <div className="container mx-auto max-w-2xl py-8 text-center">
             <Card className="shadow-lg">
                 <CardHeader>
@@ -294,7 +280,6 @@ export default function CooldownChallengePage() {
     );
   }
 
-  // Player has 0 coins, not on time cooldown, and challenge is loaded
   return (
     <div className="container mx-auto max-w-3xl py-8">
       <Card className="shadow-xl border-primary/20">
@@ -302,7 +287,7 @@ export default function CooldownChallengePage() {
           <ShieldQuestion className="h-16 w-16 mb-4 opacity-90" />
           <CardTitle className="text-4xl font-bold">Cooldown Challenge</CardTitle>
           <CardDescription className="text-lg mt-2 text-primary-foreground/80">
-            Solve this 'easy' challenge (scaled to your rank) to earn {COOLDOWN_REWARD_COINS} coins!
+            Solve this challenge (scaled to your rank) to earn {COOLDOWN_REWARD_COINS} coins!
           </CardDescription>
         </CardHeader>
         <CardContent className="p-6 md:p-8 space-y-6">
@@ -331,7 +316,7 @@ export default function CooldownChallengePage() {
                 id="code-editor"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder={`// Function signature might vary based on problem\n// Read the problem statement carefully!\nfunction solve() {\n  // Your code here\n}`}
+                placeholder={`// Function signature might vary based on problem\n// Read the problem statement carefully!\n${challenge.functionSignature || 'function solve(params) {\n  // Your code here\n}'}`}
                 className="min-h-[200px] font-mono text-sm bg-input/50 border-input focus:border-primary"
                 disabled={isSubmitting}
               />
@@ -359,25 +344,13 @@ export default function CooldownChallengePage() {
                     
                     <h4 className="font-semibold text-md text-foreground pt-2">Quality Feedback:</h4>
                     <ScrollArea className="h-24 p-2 border rounded-md bg-background">
-                        <p className="whitespace-pre-wrap">{submissionEvaluation.codeQualityFeedback}</p>
+                        <pre className="whitespace-pre-wrap">{submissionEvaluation.codeQualityFeedback}</pre>
                     </ScrollArea>
                 </CardContent>
               </Card>
-          )}
-          {submissionOutcome === "success" && !timeCooldownActive && ( // This message might be redundant if toast is good enough
-            <Alert variant="default" className="bg-green-50 border-green-300 text-green-700">
-              <CheckCircle className="h-5 w-5 text-green-600" />
-              <AlertTitle className="font-semibold">Challenge Passed!</AlertTitle>
-              <AlertDescription>
-                Congratulations! {COOLDOWN_REWARD_COINS} coins added. Cooldown period has now started.
-              </AlertDescription>
-            </Alert>
           )}
         </CardContent>
       </Card>
     </div>
   );
 }
-
-
-    
