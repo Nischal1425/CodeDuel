@@ -1,20 +1,24 @@
 
 "use client";
 
+import React, { useState } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
-import { DollarSign, Gift, History, Loader2, Mail, User, Edit3, ShieldAlert, Award } from 'lucide-react';
+import { DollarSign, Gift, History, Loader2, Mail, User, Edit3, ShieldAlert, Award, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
-import Link from 'next/link';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ALL_ACHIEVEMENTS } from '@/lib/achievements';
 import type { Achievement as AchievementType, Player } from '@/types';
 import { cn } from '@/lib/utils';
+import { useToast } from "@/hooks/use-toast";
+import { generateAvatar } from '@/ai/flows/generate-avatar';
 
 const getAchievementProgress = (player: Player, achievement: AchievementType) => {
   if (!achievement.stat) return { current: 0, goal: achievement.goal, percent: 0 };
@@ -28,7 +32,43 @@ const getAchievementProgress = (player: Player, achievement: AchievementType) =>
 
 
 export default function ProfilePage() {
-  const { player, isLoading } = useAuth(); // isLoading handled by (app)/layout.tsx
+  const { player, isLoading, setPlayer } = useAuth();
+  const { toast } = useToast();
+  const [prompt, setPrompt] = useState('');
+  const [generatedAvatar, setGeneratedAvatar] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleGenerateAvatar = async () => {
+      if (!prompt.trim()) {
+          toast({ title: "Prompt is empty", description: "Please enter a description for your avatar.", variant: "destructive" });
+          return;
+      }
+      setIsGenerating(true);
+      setGeneratedAvatar(null);
+      try {
+          const result = await generateAvatar({ prompt });
+          if (result.imageDataUri) {
+              setGeneratedAvatar(result.imageDataUri);
+              toast({ title: "Avatar Generated!", description: "You can now set it as your profile picture." });
+          } else {
+              throw new Error("Received an empty response from the AI.");
+          }
+      } catch (error) {
+          console.error("Error generating avatar:", error);
+          toast({ title: "Generation Failed", description: "Could not generate avatar. The AI might be busy. Please try again.", variant: "destructive" });
+      } finally {
+          setIsGenerating(false);
+      }
+  };
+
+  const handleSetAvatar = () => {
+      if (!generatedAvatar || !player) return;
+      setPlayer({ ...player, avatarUrl: generatedAvatar });
+      toast({
+          title: "Profile Picture Updated!",
+          className: "bg-green-500 text-white",
+      });
+  };
 
   // Safeguard for direct navigation or if layout somehow fails to redirect
   if (isLoading) {
@@ -130,7 +170,52 @@ export default function ProfilePage() {
               </Button>
             </div>
           </section>
-          
+
+          <Separator />
+
+          <section>
+            <h3 className="text-xl font-semibold mb-3 text-foreground flex items-center">
+              <Sparkles className="mr-2 h-5 w-5 text-accent" /> AI Avatar Generator
+            </h3>
+            <Card className="bg-secondary/30">
+              <CardContent className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                <div className="md:col-span-2 space-y-4">
+                  <div>
+                    <Label htmlFor="avatar-prompt">Describe your new avatar</Label>
+                    <Input
+                      id="avatar-prompt"
+                      placeholder="e.g., a cosmic owl, a robot knight, a wizard made of code"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      disabled={isGenerating}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Unleash your creativity! Let our AI craft a unique avatar for you.
+                    </p>
+                  </div>
+                  <Button onClick={handleGenerateAvatar} disabled={isGenerating || !prompt.trim()}>
+                    {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImageIcon className="mr-2 h-4 w-4" />}
+                    {isGenerating ? 'Generating...' : 'Generate Avatar'}
+                  </Button>
+                </div>
+                <div className="flex flex-col items-center justify-center space-y-3">
+                  <div className="h-32 w-32 rounded-lg bg-muted flex items-center justify-center border-2 border-dashed">
+                    {isGenerating && <Loader2 className="h-8 w-8 animate-spin text-primary" />}
+                    {!isGenerating && generatedAvatar && (
+                      <Image src={generatedAvatar} alt="Generated Avatar" width={128} height={128} className="rounded-lg object-cover" />
+                    )}
+                    {!isGenerating && !generatedAvatar && (
+                      <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                    )}
+                  </div>
+                  <Button onClick={handleSetAvatar} disabled={!generatedAvatar || isGenerating} size="sm" variant="outline">
+                    Set as Profile Picture
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
           <Separator />
 
           <section>
