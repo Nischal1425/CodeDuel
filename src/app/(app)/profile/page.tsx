@@ -175,9 +175,11 @@ export default function ProfilePage() {
               <Button variant="outline" className="w-full justify-start" disabled>
                 <Edit3 className="mr-2 h-4 w-4" /> Edit Profile (Soon)
               </Button>
-              <Button variant="outline" className="w-full justify-start" disabled>
-                <History className="mr-2 h-4 w-4" /> Match History (Soon)
-              </Button>
+               <Link href="/history" passHref legacyBehavior>
+                  <Button asChild variant="outline" className="w-full justify-start">
+                      <a><History className="mr-2 h-4 w-4" /> View Match History</a>
+                  </Button>
+              </Link>
               {player.isKycVerified ? (
                 <Button variant="outline" className="w-full justify-start text-green-600 border-green-500" disabled>
                     <ShieldCheck className="mr-2 h-4 w-4" /> Verified
@@ -262,7 +264,7 @@ export default function ProfilePage() {
                     <CardHeader>
                         <CardTitle className="text-lg flex items-center"><Gift className="mr-2 h-5 w-5 text-blue-500"/>Redeem Coins</CardTitle>
                         <CardDescription>Withdraw your winnings after KYC.</CardDescription>
-                    </CardHeader>
+                    </Header>
                      <CardContent>
                         <p className="text-sm text-muted-foreground">Once your account is KYC verified, you can redeem your coins.</p>
                     </CardContent>

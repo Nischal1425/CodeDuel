@@ -76,3 +76,15 @@ export interface Achievement {
     amount: number;
   };
 }
+
+export interface MatchHistoryEntry {
+  matchId: string;
+  opponent: {
+    username: string;
+    avatarUrl?: string;
+  };
+  outcome: 'win' | 'loss' | 'draw';
+  difficulty: 'easy' | 'medium' | 'hard';
+  wager: number;
+  date: string; // Using string for simplicity in mock data
+}

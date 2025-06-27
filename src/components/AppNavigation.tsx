@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation'; // Added useRouter
-import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award } from 'lucide-react';
+import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award, History } from 'lucide-react';
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -11,9 +11,10 @@ import {
 import { useAuth } from '@/contexts/AuthContext'; // Added useAuth
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: Home }, // Updated href
+  { href: '/dashboard', label: 'Dashboard', icon: Home },
   { href: '/arena', label: 'Arena', icon: Swords },
   { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
+  { href: '/history', label: 'Match History', icon: History },
   { href: '/achievements', label: 'Achievements', icon: Award },
   { href: '/profile', label: 'Profile', icon: UserCircle },
   { href: '/buy-coins', label: 'Buy Coins', icon: DollarSign },
