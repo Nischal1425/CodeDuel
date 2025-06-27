@@ -29,6 +29,23 @@ const getAchievementProgress = (player: Player, achievement: AchievementType) =>
   return { current, goal, percent };
 };
 
+interface InfoItemProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}
+
+function InfoItem({ icon, label, value }: InfoItemProps) {
+  return (
+    <div className="flex items-center space-x-3 p-3 bg-muted/30 rounded-lg">
+      <div className="flex-shrink-0 text-muted-foreground">{icon}</div>
+      <div>
+        <p className="text-sm font-medium text-muted-foreground">{label}</p>
+        <p className="text-md font-semibold text-foreground">{value}</p>
+      </div>
+    </div>
+  );
+}
 
 export default function ProfilePage() {
   const { player, isLoading, setPlayer } = useAuth();
@@ -69,7 +86,6 @@ export default function ProfilePage() {
       });
   };
 
-  // Safeguard for direct navigation or if layout somehow fails to redirect
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -79,11 +95,12 @@ export default function ProfilePage() {
   }
 
   if (!player) {
-    // This case should ideally be handled by the AuthenticatedAppLayout redirecting to '/'
-    return <div className="text-center py-10">Please log in to view your profile. <Link href="/" className="text-primary underline">Go to Login</Link></div>;
+    return (
+        <div className="text-center py-10">Please log in to view your profile. <Button asChild variant="link"><Link href="/">Go to Login</Link></Button></div>
+    );
   }
 
-  const progressToNextRank = (player.rating % 100); 
+  const progressToNextRank = player.rating % 100;
 
   return (
     <div className="container mx-auto max-w-4xl">
@@ -161,9 +178,9 @@ export default function ProfilePage() {
               </div>
             </TooltipProvider>
             <div className="mt-4">
-                <Link href="/achievements" passHref>
-                    <Button variant="link" className="p-0 h-auto">View All Achievements <Award className="ml-2 h-4 w-4"/></Button>
-                </Link>
+                <Button asChild variant="link" className="p-0 h-auto">
+                    <Link href="/achievements">View All Achievements <Award className="ml-2 h-4 w-4"/></Link>
+                </Button>
             </div>
           </section>
 
@@ -175,21 +192,21 @@ export default function ProfilePage() {
               <Button variant="outline" className="w-full justify-start" disabled>
                 <Edit3 className="mr-2 h-4 w-4" /> Edit Profile (Soon)
               </Button>
-               <Link href="/history" passHref legacyBehavior>
-                  <Button asChild variant="outline" className="w-full justify-start">
-                      <a><History className="mr-2 h-4 w-4" /> View Match History</a>
-                  </Button>
-              </Link>
+               <Button asChild variant="outline" className="w-full justify-start">
+                    <Link href="/history">
+                        <History className="mr-2 h-4 w-4" /> View Match History
+                    </Link>
+                </Button>
               {player.isKycVerified ? (
                 <Button variant="outline" className="w-full justify-start text-green-600 border-green-500" disabled>
                     <ShieldCheck className="mr-2 h-4 w-4" /> Verified
                 </Button>
                 ) : (
-                <Link href="/kyc" passHref legacyBehavior>
-                    <Button asChild variant="outline" className="w-full justify-start">
-                        <a><ShieldAlert className="mr-2 h-4 w-4" /> KYC Verification</a>
-                    </Button>
-                </Link>
+                <Button asChild variant="outline" className="w-full justify-start">
+                    <Link href="/kyc">
+                        <ShieldAlert className="mr-2 h-4 w-4" /> KYC Verification
+                    </Link>
+                </Button>
              )}
             </div>
           </section>
@@ -253,51 +270,33 @@ export default function ProfilePage() {
                         <p className="text-sm text-muted-foreground">Need more coins to compete? Visit the store to stock up!</p>
                     </CardContent>
                     <CardFooter>
-                        <Link href="/buy-coins" passHref legacyBehavior>
-                            <Button asChild className="w-full bg-green-600 hover:bg-green-700 text-white">
-                                <a>Visit Store</a>
-                            </Button>
-                        </Link>
+                        <Button asChild className="w-full bg-green-600 hover:bg-green-700 text-white">
+                            <Link href="/buy-coins">
+                                Visit Store
+                            </Link>
+                        </Button>
                     </CardFooter>
                 </Card>
                  <Card className="bg-secondary/30">
                     <CardHeader>
                         <CardTitle className="text-lg flex items-center"><Gift className="mr-2 h-5 w-5 text-blue-500"/>Redeem Coins</CardTitle>
                         <CardDescription>Withdraw your winnings after KYC.</CardDescription>
-                    </Header>
+                    </CardHeader>
                      <CardContent>
                         <p className="text-sm text-muted-foreground">Once your account is KYC verified, you can redeem your coins.</p>
                     </CardContent>
                     <CardFooter>
-                       <Link href="/redeem" passHref legacyBehavior>
-                            <Button asChild className="w-full bg-blue-600 hover:bg-blue-700 text-white">
-                               <a>Redeem Coins</a>
-                            </Button>
-                        </Link>
+                       <Button asChild className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                            <Link href="/redeem">
+                               Redeem Coins
+                            </Link>
+                        </Button>
                     </CardFooter>
                 </Card>
             </div>
           </section>
         </CardContent>
       </Card>
-    </div>
-  );
-}
-
-interface InfoItemProps {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}
-
-function InfoItem({ icon, label, value }: InfoItemProps) {
-  return (
-    <div className="flex items-center space-x-3 p-3 bg-muted/30 rounded-lg">
-      <div className="flex-shrink-0 text-muted-foreground">{icon}</div>
-      <div>
-        <p className="text-sm font-medium text-muted-foreground">{label}</p>
-        <p className="text-md font-semibold text-foreground">{value}</p>
-      </div>
     </div>
   );
 }
