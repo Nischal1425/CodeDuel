@@ -96,7 +96,7 @@ export default function ArenaPage() {
   const [isTestingCode, setIsTestingCode] = useState(false);
   const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(showLeaveConfirm);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   
   // Real-time battle state
   const [battleId, setBattleId] = useState<string | null>(null);
@@ -682,5 +682,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
