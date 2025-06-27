@@ -28,7 +28,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
 
 const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
@@ -96,7 +96,7 @@ export default function ArenaPage() {
   const [isTestingCode, setIsTestingCode] = useState(false);
   const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(showLeaveConfirm);
   
   // Real-time battle state
   const [battleId, setBattleId] = useState<string | null>(null);
@@ -275,28 +275,23 @@ export default function ArenaPage() {
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       if (!docSnap.exists()) {
-        // This case can happen if the opponent cancels *their* search, deleting the battle doc.
-        // Or if we cancel our own search. If we are in 'searching' state, it's a graceful exit.
-        if (gameState === 'searching') {
-            // The battle doc was deleted, probably by us confirming cancellation.
-            // resetGameState() is called in handleLeaveConfirm, so we may not need to do anything here.
-            return; 
-        }
-        toast({ title: "Battle Error", description: "The battle you were in could not be found.", variant: 'destructive' });
+        // The document was deleted, likely from a search cancellation.
+        // This is the source of truth for resetting the state.
         resetGameState(true);
         return;
       }
       
+      const currentGameState = gameState;
       const battle = { id: docSnap.id, ...docSnap.data() } as Battle;
       setBattleData(battle);
       
-      if (battle.status === 'in-progress' && gameState !== 'inGame') {
+      if (battle.status === 'in-progress' && currentGameState !== 'inGame') {
         setGameState('inGame');
         setTimeRemaining(LOBBIES.find(l => l.name === battle.difficulty)!.baseTime * 60);
       }
       
       if(battle.status === 'completed' || battle.status === 'forfeited') {
-         if(gameState !== 'gameOver') {
+         if(currentGameState !== 'gameOver') {
             const currentBattle = battleDataRef.current;
             if(currentBattle?.status !== 'completed' && currentBattle?.status !== 'forfeited') {
                // This is the first time we are processing the game over state
@@ -357,7 +352,7 @@ export default function ArenaPage() {
          setGameState('gameOver');
       }
       
-      if (battle.status === 'comparing' && gameState !== 'submittingComparison' && gameState !== 'gameOver') {
+      if (battle.status === 'comparing' && currentGameState !== 'submittingComparison' && currentGameState !== 'gameOver') {
         setGameState('submittingComparison');
       }
 
@@ -370,7 +365,7 @@ export default function ArenaPage() {
     });
 
     return () => unsub();
-  }, [battleId, player, setPlayer, addMatchToHistory, showAchievementToast, handleSubmissionFinalization, gameState, toast, router]);
+  }, [battleId, player, setPlayer, addMatchToHistory, showAchievementToast, handleSubmissionFinalization, toast, router]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -415,30 +410,34 @@ export default function ArenaPage() {
     const isSearching = gameState === 'searching';
     const isInGame = gameState === 'inGame';
     
-    // Refund for cancelling search
-    if (isSearching && battleId && player) {
-        const batch = writeBatch(db);
-        const battleRef = doc(db, 'battles', battleId);
-        batch.delete(battleRef);
-        await batch.commit();
+    // Player is cancelling their search for a game
+    if (isSearching && battleId) {
+        try {
+            // Delete the battle document from Firestore. The onSnapshot listener will then trigger
+            // the resetGameState function, which is the single source of truth for this state change.
+            await deleteDoc(doc(db, 'battles', battleId));
 
-        const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
-        if (lobby) {
-            const refundedPlayer = { ...player, coins: player.coins + lobby.entryFee };
-            setPlayer(refundedPlayer);
-            toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
+            // Locally update the player's coins and show a toast.
+            const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
+            if (lobby) {
+                const refundedPlayer = { ...player, coins: player.coins + lobby.entryFee };
+                setPlayer(refundedPlayer);
+                toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
+            }
+        } catch (error) {
+            console.error("Error cancelling search:", error);
+            toast({ title: "Error", description: "Could not cancel the search. Please try again.", variant: "destructive" });
         }
-        resetGameState(true);
     } 
-    // Forfeit game
-    else if (isInGame && battleData && player) {
+    // Player is forfeiting an ongoing game
+    else if (isInGame && battleData) {
         const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
         if (opponent) {
              await updateDoc(doc(db, 'battles', battleData.id), {
                 status: 'forfeited',
                 winnerId: opponent.id
              });
-        } else { // Should not happen in PvP
+        } else { // Should not happen in PvP, but as a fallback
              resetGameState(true);
         }
     }
@@ -683,3 +682,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
