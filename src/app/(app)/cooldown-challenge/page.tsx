@@ -49,10 +49,12 @@ export default function CooldownChallengePage() {
     try {
       const newChallenge = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: 'easy' });
       setChallenge(newChallenge);
-      if (newChallenge.functionSignature) {
-        // A simple placeholder generation, actual editor would be more complex
-        setCode(`function solve() {\n  // Your code here\n}`);
-      }
+      
+      // Use the provided function signature to create a better placeholder
+      const signature = newChallenge.functionSignature || 'function solve(params)';
+      const codeTemplate = `${signature.replace(/;\s*$/, '')} {\n  // Your code here\n  \n  return;\n}`;
+      setCode(codeTemplate);
+
     } catch (error) {
       console.error("Failed to generate cooldown challenge:", error);
       setErrorLoadingChallenge("Failed to load challenge. Please try again.");
@@ -316,7 +318,7 @@ export default function CooldownChallengePage() {
                 id="code-editor"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                placeholder={`// Function signature might vary based on problem\n// Read the problem statement carefully!\n${challenge.functionSignature || 'function solve(params) {\n  // Your code here\n}'}`}
+                placeholder="Enter your JavaScript solution here..."
                 className="min-h-[200px] font-mono text-sm bg-input/50 border-input focus:border-primary"
                 disabled={isSubmitting}
               />
