@@ -6,9 +6,10 @@ import { AppNavigation } from '@/components/AppNavigation';
 import { UserDisplay } from '@/components/UserDisplay';
 import { CodeDuelLogo } from '@/components/CodeDuelLogo';
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter } from 'next/navigation'; // Removed usePathname as it's no longer needed here for this logic
+import { useRouter } from 'next/navigation';
 import React, { useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 // Copied from original src/app/layout.tsx
 function SwordsIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -86,7 +87,7 @@ export default function AuthenticatedAppLayout({
             {/* Header title could be dynamic based on page */}
             <h1 className="text-xl font-semibold">Code Duel</h1> 
             <div className="ml-auto flex items-center gap-2">
-              {/* Future elements like notifications or theme toggle */}
+              <ThemeToggle />
             </div>
           </header>
           <main className="flex-1 overflow-y-auto p-6 bg-background">
