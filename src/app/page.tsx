@@ -42,6 +42,7 @@ export default function LandingPage() {
       rating: 1250,
       avatarUrl: 'https://placehold.co/100x100.png',
       email: email,
+      unlockedAchievements: ['first_blood', 'hot_streak_3'],
     });
     setIsLoggingIn(false);
     router.push('/dashboard');

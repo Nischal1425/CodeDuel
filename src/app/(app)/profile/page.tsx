@@ -10,7 +10,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
-import Link from 'next/link'; // For Buy Coins link
+import Link from 'next/link';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ALL_ACHIEVEMENTS } from '@/lib/achievements';
+import type { Achievement } from '@/types';
 
 export default function ProfilePage() {
   const { player, isLoading } = useAuth(); // isLoading handled by (app)/layout.tsx
@@ -30,6 +33,11 @@ export default function ProfilePage() {
   }
 
   const progressToNextRank = (player.rating % 100); 
+
+  // Get the full achievement objects for the player
+  const unlockedAchievements: Achievement[] = player.unlockedAchievements
+    .map(id => ALL_ACHIEVEMENTS.find(ach => ach.id === id))
+    .filter((ach): ach is Achievement => !!ach);
 
   return (
     <div className="container mx-auto max-w-4xl">
@@ -55,6 +63,34 @@ export default function ProfilePage() {
             <Progress value={progressToNextRank} className="w-full mt-1 h-3" />
             <p className="text-xs text-muted-foreground mt-1 text-right">{progressToNextRank}% to next rank (mock)</p>
           </div>
+
+          <Separator />
+          
+          <section>
+            <h3 className="text-xl font-semibold mb-4 text-foreground">Achievements & Badges</h3>
+            {unlockedAchievements.length > 0 ? (
+              <TooltipProvider>
+                <div className="flex flex-wrap gap-4">
+                  {unlockedAchievements.map((achievement) => (
+                    <Tooltip key={achievement.id}>
+                      <TooltipTrigger asChild>
+                        <div className="flex flex-col items-center justify-center text-center p-3 w-24 h-24 rounded-lg bg-muted/50 border border-muted-foreground/20 hover:bg-accent/10 transition-colors cursor-pointer">
+                          <achievement.icon className="h-8 w-8 text-accent mb-1" />
+                          <span className="text-xs font-medium text-muted-foreground truncate w-full">{achievement.name}</span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="font-semibold">{achievement.name}</p>
+                        <p className="text-sm text-muted-foreground">{achievement.description}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ))}
+                </div>
+              </TooltipProvider>
+            ) : (
+              <p className="text-muted-foreground text-sm">No achievements unlocked yet. Go play some duels!</p>
+            )}
+          </section>
 
           <Separator />
 

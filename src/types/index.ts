@@ -1,3 +1,5 @@
+import type { ElementType } from 'react';
+
 export interface Player {
   id: string;
   username: string;
@@ -6,6 +8,7 @@ export interface Player {
   rank: number;
   rating: number;
   avatarUrl?: string;
+  unlockedAchievements: string[];
 }
 
 export interface Question {
@@ -34,7 +37,7 @@ export interface Battle {
 export interface LeaderboardEntry {
   rank: number;
   playerId: string;
-  username: string;
+  username:string;
   rating: number;
   coins: number;
   matchesPlayed: number;
@@ -49,4 +52,11 @@ export interface Transaction {
   timestamp: Date;
   status: 'pending' | 'completed' | 'failed';
   description?: string;
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: ElementType;
 }
