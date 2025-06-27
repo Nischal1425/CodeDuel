@@ -275,9 +275,11 @@ export default function ArenaPage() {
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       if (!docSnap.exists()) {
-        // The document was deleted, likely from a search cancellation.
-        // This is the source of truth for resetting the state.
-        resetGameState(true);
+        // The document was deleted, likely from a search cancellation by the user.
+        // The primary reset logic is in `handleLeaveConfirm`, this is a fallback.
+        if (gameState !== 'selectingLobby') {
+            resetGameState(true);
+        }
         return;
       }
       
@@ -365,7 +367,7 @@ export default function ArenaPage() {
     });
 
     return () => unsub();
-  }, [battleId, player, setPlayer, addMatchToHistory, showAchievementToast, handleSubmissionFinalization, toast, router]);
+  }, [battleId, player, setPlayer, addMatchToHistory, showAchievementToast, handleSubmissionFinalization, toast, router, gameState]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -411,22 +413,29 @@ export default function ArenaPage() {
     const isInGame = gameState === 'inGame';
     
     // Player is cancelling their search for a game
-    if (isSearching && battleId) {
+    if (isSearching) {
         try {
-            // Delete the battle document from Firestore. The onSnapshot listener will then trigger
-            // the resetGameState function, which is the single source of truth for this state change.
-            await deleteDoc(doc(db, 'battles', battleId));
-
-            // Locally update the player's coins and show a toast.
+            // If a battle document was already created in Firestore, delete it.
+            if (battleId) {
+                await deleteDoc(doc(db, 'battles', battleId));
+            }
+            
+            // Refund the user's entry fee locally.
             const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
             if (lobby) {
                 const refundedPlayer = { ...player, coins: player.coins + lobby.entryFee };
                 setPlayer(refundedPlayer);
                 toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
             }
+
+            // Immediately reset the game state to go back to lobby selection.
+            resetGameState(true);
+
         } catch (error) {
             console.error("Error cancelling search:", error);
             toast({ title: "Error", description: "Could not cancel the search. Please try again.", variant: "destructive" });
+            // Always reset state on error to avoid being stuck.
+            resetGameState(true);
         }
     } 
     // Player is forfeiting an ongoing game
