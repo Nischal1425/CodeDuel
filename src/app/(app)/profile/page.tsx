@@ -147,7 +147,7 @@ export default function ProfilePage() {
             <h3 className="text-xl font-semibold mb-4 text-foreground">Achievements & Badges</h3>
             <TooltipProvider>
               <div className="flex flex-wrap gap-4">
-                {ALL_ACHIEVEMENTS.map((achievement) => {
+                {ALL_ACHIEVEMENTS.slice(0, 5).map((achievement) => { // Show first 5 as a preview
                   const isUnlocked = player.unlockedAchievements.includes(achievement.id);
                   const progress = getAchievementProgress(player, achievement);
                   
@@ -175,13 +175,21 @@ export default function ProfilePage() {
                     </Tooltip>
                   );
                 })}
+                 <Tooltip delayDuration={100}>
+                    <TooltipTrigger asChild>
+                      <Link href="/achievements">
+                        <div className="flex flex-col items-center justify-center text-center p-3 w-24 h-28 rounded-lg bg-muted/50 border-2 border-dashed border-muted-foreground/40 hover:border-primary transition-colors hover:bg-primary/5">
+                            <Award className="h-8 w-8 mb-2 text-muted-foreground"/>
+                            <span className="text-xs font-medium text-muted-foreground">View All</span>
+                        </div>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>See all your achievements</p>
+                    </TooltipContent>
+                  </Tooltip>
               </div>
             </TooltipProvider>
-            <div className="mt-4">
-                <Button asChild variant="link" className="p-0 h-auto">
-                    <Link href="/achievements">View All Achievements <Award className="ml-2 h-4 w-4"/></Link>
-                </Button>
-            </div>
           </section>
 
           <Separator />
