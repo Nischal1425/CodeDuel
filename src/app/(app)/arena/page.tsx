@@ -275,6 +275,13 @@ export default function ArenaPage() {
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       if (!docSnap.exists()) {
+        // This case can happen if the opponent cancels *their* search, deleting the battle doc.
+        // Or if we cancel our own search. If we are in 'searching' state, it's a graceful exit.
+        if (gameState === 'searching') {
+            // The battle doc was deleted, probably by us confirming cancellation.
+            // resetGameState() is called in handleLeaveConfirm, so we may not need to do anything here.
+            return; 
+        }
         toast({ title: "Battle Error", description: "The battle you were in could not be found.", variant: 'destructive' });
         resetGameState(true);
         return;
@@ -409,9 +416,9 @@ export default function ArenaPage() {
     const isInGame = gameState === 'inGame';
     
     // Refund for cancelling search
-    if (isSearching && battleData && player) {
+    if (isSearching && battleId && player) {
         const batch = writeBatch(db);
-        const battleRef = doc(db, 'battles', battleData.id);
+        const battleRef = doc(db, 'battles', battleId);
         batch.delete(battleRef);
         await batch.commit();
 
