@@ -18,7 +18,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { GameTimer } from './_components/GameTimer';
 import { ProblemDisplay } from './_components/ProblemDisplay';
-import type { Player } from '@/types';
+import type { Player, MatchHistoryEntry } from '@/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -221,6 +221,29 @@ export default function ArenaPage() {
         className: "bg-accent text-accent-foreground border-yellow-400",
     });
   }, [toast]);
+  
+  const addMatchToHistory = useCallback((currentPlayer: Player, outcome: 'win' | 'loss' | 'draw'): Player => {
+    const opponent = mockOpponentRef.current;
+    const lobby = currentLobbyDetailsRef.current;
+    if (!opponent || !lobby) return currentPlayer;
+
+    const newEntry: MatchHistoryEntry = {
+      matchId: `match_${Date.now()}`,
+      opponent: {
+        username: opponent.username,
+        avatarUrl: opponent.avatarUrl,
+      },
+      outcome: outcome,
+      difficulty: lobby.name,
+      wager: lobby.entryFee,
+      date: new Date().toISOString().split('T')[0],
+    };
+    
+    return {
+        ...currentPlayer,
+        matchHistory: [newEntry, ...(currentPlayer.matchHistory || [])]
+    };
+  }, []);
 
  const handleSubmissionFinalization = useCallback(async () => {
     const currentQuestion = questionRef.current;
@@ -260,6 +283,7 @@ export default function ArenaPage() {
       let toastDesc = `The duel ended in a draw. Your entry fee of ${entryFee} coins has been refunded.`;
       let toastVariant: "default" | "destructive" = "default";
       let wonMatch = false;
+      let outcome: 'win' | 'loss' | 'draw' = 'draw';
 
       if (result.winner === 'player1') {
         reason = "comparison_player1_wins";
@@ -270,12 +294,14 @@ export default function ArenaPage() {
         toastDesc = `You won the duel! ${winningsPaidOut} coins awarded.`;
         toastVariant = "default";
         wonMatch = true;
+        outcome = 'win';
       } else if (result.winner === 'player2') {
         reason = "comparison_player2_wins";
         toastTitle = "Defeat";
         toastDesc = "Your opponent's solution was deemed superior.";
         toastVariant = "destructive";
         wonMatch = false;
+        outcome = 'loss';
       }
       
       const achievementResult = checkAchievementsOnMatchEnd(player, {
@@ -297,7 +323,9 @@ export default function ArenaPage() {
         finalPlayer = { ...finalPlayer, coins: finalPlayer.coins + entryFee };
       }
       
-      setPlayer(finalPlayer);
+      const playerWithHistory = addMatchToHistory(finalPlayer, outcome);
+      setPlayer(playerWithHistory);
+      
       setGameOverReason(reason);
       toast({ title: toastTitle, description: toastDesc, variant: toastVariant, duration: 7000 });
       
@@ -314,7 +342,7 @@ export default function ArenaPage() {
       setIsComparing(false);
       setGameState('gameOver');
     }
-  }, [player, setPlayer, toast, showAchievementToast]);
+  }, [player, setPlayer, toast, showAchievementToast, addMatchToHistory]);
 
 
   const fetchQuestionForLobby = useCallback(async (lobbyInfo: LobbyInfo) => {
@@ -440,6 +468,8 @@ export default function ArenaPage() {
       wins: Math.floor(Math.random() * 100),
       losses: Math.floor(Math.random() * 100),
       winStreak: Math.floor(Math.random() * 5),
+      isKycVerified: false,
+      matchHistory: [],
     };
 
     setTimeout(() => {
@@ -502,7 +532,8 @@ export default function ArenaPage() {
       const totalPot = entryFee * 2;
       const commissionAmount = Math.floor(totalPot * COMMISSION_RATE);
       const winningsPaidOut = totalPot - commissionAmount;
-      const finalPlayer = { ...achievementResult.updatedPlayer, coins: achievementResult.updatedPlayer.coins + winningsPaidOut };
+      let finalPlayer = { ...achievementResult.updatedPlayer, coins: achievementResult.updatedPlayer.coins + winningsPaidOut };
+      finalPlayer = addMatchToHistory(finalPlayer, 'win');
       
       setPlayer(finalPlayer);
       setGameOverReason("opponent_failed_to_submit_player_wins");
@@ -512,14 +543,16 @@ export default function ArenaPage() {
     } else if (!playerHasSubmittedCodeRef.current && opponentHasSubmittedCodeRef.current) {
       const achievementResult = checkAchievementsOnMatchEnd(player, { won: false, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
 
-      setPlayer(achievementResult.updatedPlayer);
+      const finalPlayer = addMatchToHistory(achievementResult.updatedPlayer, 'loss');
+      setPlayer(finalPlayer);
       setGameOverReason("player_failed_to_submit_opponent_wins");
       toast({ title: "Defeat", description: `You failed to submit in time after your opponent. Entry fee lost.`, variant: "destructive", duration: 7000 });
       achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
       setGameState('gameOver');
     } else { // Neither submitted
       const achievementResult = checkAchievementsOnMatchEnd(player, { won: false, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
-      setPlayer(achievementResult.updatedPlayer);
+      const finalPlayer = addMatchToHistory(achievementResult.updatedPlayer, 'draw');
+      setPlayer(finalPlayer);
       setGameOverReason("timeup_neither_submitted");
       achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
       setGameState('gameOver'); 
@@ -540,14 +573,15 @@ export default function ArenaPage() {
     const fee = lobbyDetails.entryFee;
 
     if (leaveConfirmType === 'search') {
-        const updatedPlayer = { ...player, coins: player.coins + fee }; // Refund fee, then forfeit
-        setPlayer({ ...updatedPlayer, coins: updatedPlayer.coins - fee }); // Forfeit
-        toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${fee} coins was forfeited.`, variant: "default" });
+        const updatedPlayer = { ...player, coins: player.coins + fee }; 
+        setPlayer(updatedPlayer);
+        toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee of ${fee} coins has been refunded.`, variant: "default" });
         resetGameState(true);
         setGameOverReason("cancelledSearch"); 
     } else if (leaveConfirmType === 'game' && opponent) {
         const achievementResult = checkAchievementsOnMatchEnd(player, { won: false, opponentRank: opponent.rank, lobbyDifficulty: lobbyDetails.name });
-        setPlayer(achievementResult.updatedPlayer);
+        const finalPlayer = addMatchToHistory(achievementResult.updatedPlayer, 'loss');
+        setPlayer(finalPlayer);
         toast({ title: "Match Forfeited", description: `You forfeited the match. Your entry fee of ${fee} coins was lost.`, variant: "destructive" });
         achievementResult.newlyUnlocked.forEach(ach => showAchievementToast(ach));
         setGameOverReason("forfeit_player1");
@@ -901,7 +935,7 @@ export default function ArenaPage() {
               break;
           case "cancelledSearch":
               title = "Search Cancelled";
-              message = `You left the lobby. Your entry fee of ${entryFeePaid} coins was forfeited.`; 
+              message = `You left the lobby. Your entry fee of ${entryFeePaid} coins has been refunded.`; 
               icon = <LogOut className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
               break;
           case "comparison_failed":
@@ -1257,10 +1291,14 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
   if (!type) return null;
 
   const title = type === 'search' ? "Cancel Search?" : "Forfeit Match?";
-  const description = type === 'search'
-    ? "Are you sure you want to cancel the search and leave the lobby? Your entry fee will be forfeited."
+  let description = type === 'search'
+    ? "Are you sure you want to cancel the search and leave the lobby?"
     : "Are you sure you want to forfeit the match? This will count as a loss, and your entry fee will be forfeited.";
 
+  if (type === 'search') {
+      description = "Are you sure you want to cancel the search? Your entry fee will be refunded."
+  }
+    
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="z-[100]"> 
@@ -1272,7 +1310,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => onOpenChange(false)}>Stay</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+          <AlertDialogAction onClick={onConfirm} className={cn(type === 'game' && 'bg-destructive hover:bg-destructive/90 text-destructive-foreground')}>
             {type === 'search' ? "Leave Lobby" : "Forfeit"}
           </AlertDialogAction>
         </AlertDialogFooter>

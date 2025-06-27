@@ -16,10 +16,11 @@ export interface Player {
   winStreak: number;
   // New field for Pro Circuit
   isKycVerified: boolean;
+  matchHistory: MatchHistoryEntry[];
 }
 
 export interface Question {
-  id: string;
+  id:string;
   problemStatement: string;
   difficulty: 'easy' | 'medium' | 'hard';
   timeLimitMinutes: number; // Time limit in minutes

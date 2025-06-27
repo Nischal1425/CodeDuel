@@ -9,6 +9,26 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { CodeDuelLogo } from '@/components/CodeDuelLogo';
 import { Swords, LogIn, Info, Loader2 } from 'lucide-react';
+import type { MatchHistoryEntry } from '@/types';
+
+const initialHistory: MatchHistoryEntry[] = [
+  {
+    matchId: 'm1',
+    opponent: { username: 'ByteMaster', avatarUrl: 'https://placehold.co/40x40.png?text=BM' },
+    outcome: 'win',
+    difficulty: 'medium',
+    wager: 100,
+    date: '2024-07-20',
+  },
+  {
+    matchId: 'm2',
+    opponent: { username: 'AlgoQueen', avatarUrl: 'https://placehold.co/40x40.png?text=AQ' },
+    outcome: 'loss',
+    difficulty: 'hard',
+    wager: 200,
+    date: '2024-07-19',
+  },
+];
 
 export default function LandingPage() {
   const router = useRouter();
@@ -48,6 +68,7 @@ export default function LandingPage() {
       losses: 10,
       winStreak: 3,
       isKycVerified: false,
+      matchHistory: initialHistory,
     });
     setIsLoggingIn(false);
     router.push('/dashboard');
