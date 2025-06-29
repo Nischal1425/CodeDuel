@@ -9,10 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info, Award } from 'lucide-react';
+import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info, Award, FileCode, XCircle } from 'lucide-react';
 import type { GenerateCodingChallengeOutput, TestCase } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
-import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
+import type { CompareCodeSubmissionsOutput, CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
@@ -25,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ToastAction } from "@/components/ui/toast";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
@@ -216,7 +217,7 @@ export default function ArenaPage() {
     }
     
     try {
-      const result = await compareCodeSubmissions({
+      const submissionInput: CompareCodeSubmissionsInput = {
         player1Code: currentBattle.player1.code || "",
         player2Code: currentBattle.player2?.code || "",
         player1Language: currentBattle.player1.language,
@@ -224,7 +225,9 @@ export default function ArenaPage() {
         referenceSolution: currentBattle.question.solution,
         problemStatement: currentBattle.question.problemStatement,
         difficulty: currentBattle.difficulty,
-      });
+      };
+
+      const result = await compareCodeSubmissions(submissionInput);
 
       let winnerId;
       if (result.winner === 'player1') winnerId = currentBattle.player1.id;
@@ -680,6 +683,10 @@ export default function ArenaPage() {
       }
       
       const comparisonResult = battleData.comparisonResult;
+      const player1 = battleData.player1;
+      const player2 = battleData.player2!;
+      const player1Eval = comparisonResult?.player1Evaluation;
+      const player2Eval = comparisonResult?.player2Evaluation;
 
       return (
         <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
@@ -690,12 +697,66 @@ export default function ArenaPage() {
               <CardDescription className="text-lg text-muted-foreground">{message}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {comparisonResult && (
-                 <Accordion type="single" collapsible className="w-full">
+              {comparisonResult && player1Eval && player2Eval && (
+                 <Accordion type="single" collapsible className="w-full" defaultValue="comparison-details">
                   <AccordionItem value="comparison-details">
                     <AccordionTrigger className="text-lg hover:no-underline"><Brain className="mr-2 h-5 w-5 text-primary"/> Detailed AI Duel Report</AccordionTrigger>
                     <AccordionContent className="space-y-4 pt-4">
-                      {/* Detailed report UI goes here, using comparisonResult */}
+                       <Card className="bg-muted/30">
+                          <CardHeader>
+                            <CardTitle className="text-xl">Duel Summary</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2 text-sm">
+                            <p><strong className="text-foreground">Winning Reason:</strong> {comparisonResult.winningReason}</p>
+                            <p><strong className="text-foreground">Comparison:</strong> {comparisonResult.comparisonSummary}</p>
+                          </CardContent>
+                       </Card>
+
+                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {[
+                          {player: player1, evaluation: player1Eval, title: `${player1.username} ${player1.id === player?.id ? '(You)' : ''}`},
+                          {player: player2, evaluation: player2Eval, title: `${player2.username} ${player2.id === player?.id ? '(You)' : ''}`}
+                        ].map((data, index) => (
+                           <Card key={index} className={cn("flex flex-col", battleData.winnerId === data.player.id ? 'border-green-500' : battleData.winnerId && 'opacity-70')}>
+                             <CardHeader>
+                               <CardTitle className="flex items-center justify-between">
+                                  <span>{data.title}</span>
+                                  {data.evaluation.isPotentiallyCorrect ? 
+                                    <Badge variant="default" className="bg-green-500 hover:bg-green-600"><CheckCircle className="mr-1 h-4 w-4"/> Correct</Badge> : 
+                                    <Badge variant="destructive"><XCircle className="mr-1 h-4 w-4"/> Incorrect</Badge>
+                                  }
+                               </CardTitle>
+                             </CardHeader>
+                             <CardContent className="flex-grow">
+                                <Tabs defaultValue="feedback">
+                                    <TabsList className="grid w-full grid-cols-2">
+                                        <TabsTrigger value="feedback">AI Feedback</TabsTrigger>
+                                        <TabsTrigger value="code"><FileCode className="mr-1 h-4 w-4"/> Code</TabsTrigger>
+                                    </TabsList>
+                                    <TabsContent value="feedback" className="text-sm space-y-3 mt-4">
+                                        <p><strong className="text-foreground">Correctness:</strong> {data.evaluation.correctnessExplanation}</p>
+                                        <p><strong className="text-foreground">Time Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedTimeComplexity}</Badge></p>
+                                        <p><strong className="text-foreground">Space Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedSpaceComplexity}</Badge></p>
+                                        <p><strong className="text-foreground">Overall Assessment:</strong> {data.evaluation.overallAssessment}</p>
+                                        <div>
+                                          <strong className="text-foreground">Code Quality Feedback:</strong>
+                                          <ScrollArea className="h-24 mt-1 rounded-md border bg-background/50 p-2 text-xs">
+                                              <pre className="whitespace-pre-wrap font-sans">{data.evaluation.codeQualityFeedback}</pre>
+                                          </ScrollArea>
+                                        </div>
+                                    </TabsContent>
+                                    <TabsContent value="code">
+                                        <Textarea 
+                                            readOnly 
+                                            value={data.player.code}
+                                            className="font-mono text-xs h-64 resize-none mt-2"
+                                        />
+                                    </TabsContent>
+                                </Tabs>
+                             </CardContent>
+                           </Card>
+                        ))}
+                       </div>
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>
@@ -816,7 +877,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
 
     
