@@ -658,7 +658,9 @@ export default function ArenaPage() {
 
   return (
     <>
-      {!isFullScreenState && renderContent()}
+      <div className={cn(isFullScreenState && 'hidden')}>
+        {renderContent()}
+      </div>
       {isFullScreenState && (
         <div className="fixed inset-0 bg-background z-50 flex flex-col items-stretch justify-start p-0 overflow-auto">
           <div className="flex-grow flex flex-col">

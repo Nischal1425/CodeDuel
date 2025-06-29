@@ -43,26 +43,10 @@ export default function LandingPage() {
     if (!IS_FIREBASE_CONFIGURED) {
       // Mock login for offline mode
       await new Promise(resolve => setTimeout(resolve, 1000));
-      const mockPlayer = {
-        id: 'player123-mock',
-        username: email.split('@')[0] || 'CodeWarrior',
-        coins: 1000,
-        rank: 15,
-        rating: 1250,
-        avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
-        email: email,
-        unlockedAchievements: ['first_win'],
-        matchesPlayed: 25,
-        wins: 15,
-        losses: 10,
-        winStreak: 3,
-        isKycVerified: false,
-        matchHistory: [],
-      };
-      setPlayerId(mockPlayer.id); // In a real app, you'd just set the player object. Here we need an ID for context.
-      // This is a bit of a hack for the mock scenario, the AuthProvider isn't set up to handle a mock player without an ID.
-      // For the demo, we'll just navigate.
+      const mockPlayerId = `mock-${email.replace(/@.*/, '')}`;
+      setPlayerId(mockPlayerId);
       router.push('/dashboard');
+      setIsLoggingIn(false);
       return;
     }
     
