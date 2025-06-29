@@ -735,8 +735,8 @@ export default function ArenaPage() {
                                     </TabsList>
                                     <TabsContent value="feedback" className="text-sm space-y-3 mt-4">
                                         <p><strong className="text-foreground">Correctness:</strong> {data.evaluation.correctnessExplanation}</p>
-                                        <p><strong className="text-foreground">Time Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedTimeComplexity}</Badge></p>
-                                        <p><strong className="text-foreground">Space Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedSpaceComplexity}</Badge></p>
+                                        <div><strong className="text-foreground">Time Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedTimeComplexity}</Badge></div>
+                                        <div><strong className="text-foreground">Space Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedSpaceComplexity}</Badge></div>
                                         <p><strong className="text-foreground">Overall Assessment:</strong> {data.evaluation.overallAssessment}</p>
                                         <div>
                                           <strong className="text-foreground">Code Quality Feedback:</strong>
