@@ -821,18 +821,14 @@ export default function ArenaPage() {
                     {opponent.hasSubmitted && !me?.hasSubmitted && <p className="mt-2 text-sm text-yellow-600 animate-pulse">Opponent has submitted!</p>}
                     {me?.hasSubmitted && !opponent.hasSubmitted && <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>}
                 </CardHeader>
-                <CardContent className="flex-grow p-4 flex flex-col min-h-0">
-                  <div className="relative flex-grow">
-                    <div className="absolute inset-0">
-                       <CodeEditor
-                          value={code}
-                          onChange={setCode}
-                          language={language}
-                          readOnly={me?.hasSubmitted}
-                        />
-                    </div>
-                  </div>
-                </CardContent>
+                <div className="flex-grow min-h-0">
+                    <CodeEditor
+                        value={code}
+                        onChange={setCode}
+                        language={language}
+                        readOnly={me?.hasSubmitted}
+                    />
+                </div>
                  <div className="p-4 border-t flex flex-col gap-2">
                     <Button onClick={handleSubmitCode} disabled={me?.hasSubmitted || !code.trim()} className="w-full">
                         {me?.hasSubmitted ? "Code Submitted" : "Submit for Final AI Duel"}
