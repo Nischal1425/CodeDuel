@@ -22,6 +22,8 @@ import { generateAvatar } from '@/ai/flows/generate-avatar';
 import { db } from '@/lib/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+
 const getAchievementProgress = (player: Player, achievement: AchievementType) => {
   if (!achievement.stat) return { current: 0, goal: achievement.goal, percent: 0 };
   
@@ -86,13 +88,15 @@ export default function ProfilePage() {
       setIsUpdating(true);
       
       try {
-          const playerRef = doc(db, "players", player.id);
-          await updateDoc(playerRef, {
-              avatarUrl: generatedAvatar
-          });
+          if (IS_FIREBASE_CONFIGURED) {
+            const playerRef = doc(db, "players", player.id);
+            await updateDoc(playerRef, {
+                avatarUrl: generatedAvatar
+            });
+          }
           
           // Optimistically update local state via AuthContext.
-          // The real-time listener will also catch this, but this makes the UI feel faster.
+          // This runs in both modes and makes the UI feel faster.
           setPlayer({ ...player, avatarUrl: generatedAvatar });
 
           toast({
@@ -331,3 +335,5 @@ export default function ProfilePage() {
     </div>
   );
 }
+
+    
