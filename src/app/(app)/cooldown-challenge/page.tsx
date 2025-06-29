@@ -5,7 +5,6 @@ import type { FormEvent } from 'react';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Textarea } from '@/components/ui/textarea';
 import { Loader2, ShieldQuestion, CheckCircle, AlertTriangle, Info, Brain, Coins as CoinsIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useToast } from '@/hooks/use-toast';
@@ -17,6 +16,7 @@ import { evaluateCodeSubmission } from '@/ai/flows/evaluate-code-submission';
 import Link from 'next/link';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { CodeEditor } from '@/app/(app)/arena/_components/CodeEditor';
 
 const COOLDOWN_DURATION_HOURS = 3;
 const COOLDOWN_REWARD_COINS = 50;
@@ -314,14 +314,15 @@ export default function CooldownChallengePage() {
               <label htmlFor="code-editor" className="block text-sm font-medium text-foreground mb-1">
                 Your Solution (JavaScript):
               </label>
-              <Textarea
-                id="code-editor"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Enter your JavaScript solution here..."
-                className="min-h-[200px] font-mono text-sm bg-input/50 border-input focus:border-primary"
-                disabled={isSubmitting}
-              />
+              <div className="h-[250px] w-full border rounded-md overflow-hidden">
+                <CodeEditor
+                  value={code}
+                  onChange={setCode}
+                  language="javascript"
+                  readOnly={isSubmitting}
+                  height="250px"
+                />
+              </div>
             </div>
             <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isSubmitting || !code.trim()}>
               {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

@@ -6,7 +6,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info, Award, FileCode, XCircle } from 'lucide-react';
@@ -18,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import { GameTimer } from './_components/GameTimer';
 import { ProblemDisplay } from './_components/ProblemDisplay';
+import { CodeEditor } from './_components/CodeEditor';
 import type { Player, MatchHistoryEntry, SupportedLanguage, Battle } from '@/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
@@ -745,12 +745,15 @@ export default function ArenaPage() {
                                           </ScrollArea>
                                         </div>
                                     </TabsContent>
-                                    <TabsContent value="code">
-                                        <Textarea 
-                                            readOnly 
-                                            value={data.player.code}
-                                            className="font-mono text-xs h-64 resize-none mt-2"
-                                        />
+                                    <TabsContent value="code" className="mt-2">
+                                        <div className="h-64 w-full border rounded-md overflow-hidden">
+                                          <CodeEditor
+                                            value={data.player.code || ''}
+                                            language={data.player.language}
+                                            readOnly={true}
+                                            height="256px"
+                                          />
+                                        </div>
                                     </TabsContent>
                                 </Tabs>
                              </CardContent>
@@ -819,7 +822,16 @@ export default function ArenaPage() {
                     {me?.hasSubmitted && !opponent.hasSubmitted && <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>}
                 </CardHeader>
                 <CardContent className="flex-grow p-4 flex flex-col min-h-0">
-                    <Textarea value={code} onChange={(e) => setCode(e.target.value)} disabled={me?.hasSubmitted} className="flex-grow font-mono text-sm resize-none" />
+                  <div className="relative flex-grow">
+                    <div className="absolute inset-0">
+                       <CodeEditor
+                          value={code}
+                          onChange={setCode}
+                          language={language}
+                          readOnly={me?.hasSubmitted}
+                        />
+                    </div>
+                  </div>
                 </CardContent>
                  <div className="p-4 border-t flex flex-col gap-2">
                     <Button onClick={handleSubmitCode} disabled={me?.hasSubmitted || !code.trim()} className="w-full">
@@ -877,5 +889,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
