@@ -1,6 +1,7 @@
 
 import type { ElementType } from 'react';
-import type { GenerateCodingChallengeOutput, CompareCodeSubmissionsOutput } from '@/ai/flows/generate-coding-challenge';
+import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
+import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
 
 export type SupportedLanguage = "javascript" | "python" | "cpp";
 
