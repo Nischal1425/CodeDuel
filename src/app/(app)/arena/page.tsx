@@ -31,6 +31,7 @@ import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
 import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import Link from 'next/link';
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
@@ -765,9 +766,14 @@ export default function ArenaPage() {
                 </Accordion>
               )}
                <div className="text-center text-muted-foreground">Your coins: {player?.coins ?? 0} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/></div>
-              <Button onClick={() => resetGameState(true)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
-               Play Again (Back to Lobbies)
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                <Button asChild variant="outline" className="w-full">
+                  <Link href="/dashboard">Return to Dashboard</Link>
+                </Button>
+                <Button onClick={() => resetGameState(true)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+                  Find New Match
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
