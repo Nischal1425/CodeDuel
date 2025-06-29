@@ -22,6 +22,38 @@ const COOLDOWN_DURATION_HOURS = 3;
 const COOLDOWN_REWARD_COINS = 50;
 const ELIGIBILITY_COIN_THRESHOLD = 50;
 
+// A simple function to convert markdown-like text to styled HTML.
+const formatProblemStatement = (statement: string): string => {
+  const html = statement
+    // Bold
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    // Inline code
+    .replace(/`([^`]+?)`/g, '<code class="font-mono bg-muted/70 text-foreground/80 rounded-sm px-1.5 py-1 text-xs">$1</code>')
+    // Headings (e.g., ### Constraints)
+    .replace(/^###\s+(.*)/gm, '<h3>$1</h3>')
+    // Code blocks (e.g., ```javascript ... ```)
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
+    // Unordered lists
+    .replace(/^\s*[-*]\s+(.*)/gm, '<li>$1</li>')
+    // Wrap consecutive list items in <ul>
+    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+    // Handle paragraphs and line breaks
+    .split('\n\n')
+    .map(p => p.trim())
+    .filter(p => p)
+    .map(p => {
+        if (p.startsWith('<ul>') || p.startsWith('<h3>') || p.startsWith('<pre>')) {
+            return p;
+        }
+        // Replace single newlines with <br> for line breaks within a paragraph
+        return `<p>${p.replace(/\n/g, '<br />')}</p>`;
+    })
+    .join('');
+
+  return html;
+};
+
+
 export default function CooldownChallengePage() {
   const { toast } = useToast();
   const { player, setPlayer, isLoading: authLoading } = useAuth();
@@ -282,6 +314,8 @@ export default function CooldownChallengePage() {
     );
   }
 
+  const formattedStatement = formatProblemStatement(challenge.problemStatement);
+
   return (
     <div className="container mx-auto max-w-3xl py-8">
       <Card className="shadow-xl border-primary/20">
@@ -302,9 +336,7 @@ export default function CooldownChallengePage() {
             </CardHeader>
             <CardContent className="prose prose-sm max-w-none text-foreground/90">
                 <ScrollArea className="h-48 p-1">
-                 {challenge.problemStatement.split('\n').map((paragraph, index) => (
-                    <p key={index} className="mb-3 last:mb-0">{paragraph}</p>
-                ))}
+                 <div dangerouslySetInnerHTML={{ __html: formattedStatement }} />
                 </ScrollArea>
             </CardContent>
           </Card>
