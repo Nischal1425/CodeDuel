@@ -5,33 +5,29 @@ import type { FormEvent } from 'react';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, AlertTriangle, CheckCircle, Send, UsersRound, Target, Zap, Swords, UserSquare2, Sparkles, HelpCircle, Brain, Coins as CoinsIcon, TimerIcon, Flag, LogOut, PlaySquare, Info, Award, FileCode, XCircle } from 'lucide-react';
-import type { GenerateCodingChallengeOutput, TestCase } from '@/ai/flows/generate-coding-challenge';
+import { Loader2, UsersRound, Target, Zap, Sparkles } from 'lucide-react';
+import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
-import type { CompareCodeSubmissionsOutput, CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
+import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import { GameTimer } from './_components/GameTimer';
-import { ProblemDisplay } from './_components/ProblemDisplay';
-import { CodeEditor } from './_components/CodeEditor';
 import type { Player, MatchHistoryEntry, SupportedLanguage, Battle } from '@/types';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ToastAction } from "@/components/ui/toast";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
 import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc } from "firebase/firestore";
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import Link from 'next/link';
+
+// Component Imports
+import { LobbySelection } from './_components/LobbySelection';
+import type { DifficultyLobby, LobbyInfo } from './_components/LobbySelection';
+import { SearchingView } from './_components/SearchingView';
+import { DuelView } from './_components/DuelView';
+import { GameOverReport } from './_components/GameOverReport';
+
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
@@ -39,55 +35,12 @@ const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
 
 type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingComparison' | 'gameOver';
-type DifficultyLobby = 'easy' | 'medium' | 'hard';
-
-interface LobbyInfo {
-  name: DifficultyLobby;
-  title: string;
-  description: string;
-  icon: React.ElementType;
-  baseTime: number; // minutes
-  entryFee: number;
-}
 
 const LOBBIES: LobbyInfo[] = [
   { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, entryFee: 50 },
   { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 10, entryFee: 100 },
   { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, entryFee: 200 },
 ];
-
-interface TestResult {
-  testCaseName: string;
-  input: string;
-  expectedOutput: string;
-  actualOutput: string;
-  status: 'pass' | 'fail' | 'error' | 'not_run' | 'client_unsupported';
-  errorMessage?: string;
-}
-
-function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (difficulty: DifficultyLobby) => void; disabled?: boolean; }) {
-  return (
-    <Card className={`hover:shadow-lg transition-shadow ${disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} flex flex-col`}>
-      <CardHeader className="items-center text-center">
-        <lobby.icon className="h-12 w-12 text-primary mb-3" />
-        <CardTitle className="text-2xl">{lobby.title}</CardTitle>
-        <CardDescription>{lobby.description}</CardDescription>
-      </CardHeader>
-      <CardContent className="text-center space-y-2 text-sm text-muted-foreground flex-grow">
-        <p className="font-semibold text-primary">Entry Fee: {lobby.entryFee} <CoinsIcon className="inline h-4 w-4 text-yellow-500" /></p>
-      </CardContent>
-      <CardFooter>
-        <Button
-            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-            onClick={() => !disabled && onSelectLobby(lobby.name)}
-            disabled={disabled}
-        >
-          Join {lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)} Lobby
-        </Button>
-      </CardFooter>
-    </Card>
-  );
-}
 
 export default function ArenaPage() {
   const { player, setPlayer } = useAuth();
@@ -98,8 +51,6 @@ export default function ArenaPage() {
   const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
   const [code, setCode] = useState<string>('');
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE);
-  const [isTestingCode, setIsTestingCode] = useState(false);
-  const [testResults, setTestResults] = useState<TestResult[]>([]);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   
@@ -116,8 +67,6 @@ export default function ArenaPage() {
     }
     setCode('');
     setLanguage(DEFAULT_LANGUAGE);
-    setIsTestingCode(false);
-    setTestResults([]);
     setTimeRemaining(0);
     setShowLeaveConfirm(false);
     setBattleId(null);
@@ -126,8 +75,8 @@ export default function ArenaPage() {
 
   const showAchievementToast = useCallback((achievement) => {
     toast({
-        title: <div className="flex items-center gap-2"><Award className="h-6 w-6 text-yellow-400" /><span className="font-semibold">Achievement Unlocked!</span></div>,
-        description: <div><p className="font-medium text-lg">{achievement.name}</p>{achievement.reward && (<p className="mt-1 text-sm text-green-500 font-bold flex items-center gap-1">+ {achievement.reward.amount} <CoinsIcon className="h-4 w-4" /></p>)}</div>,
+        title: <div className="flex items-center gap-2"><span className="font-semibold">Achievement Unlocked!</span></div>,
+        description: <div><p className="font-medium text-lg">{achievement.name}</p>{achievement.reward && (<p className="mt-1 text-sm text-green-500 font-bold flex items-center gap-1">+ {achievement.reward.amount}</p>)}</div>,
         duration: 8000,
         className: "bg-accent text-accent-foreground border-yellow-400",
     });
@@ -271,7 +220,6 @@ export default function ArenaPage() {
 
     setGameState('searching');
     setSelectedLobbyName(lobby.name);
-    setTestResults([]);
 
     const waitingBattlesQuery = query(
         collection(db, "battles"), 
@@ -342,7 +290,6 @@ export default function ArenaPage() {
       
       setGameState('searching');
       setSelectedLobbyName(lobby.name);
-      setTestResults([]);
 
       try {
           const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
@@ -587,11 +534,8 @@ export default function ArenaPage() {
   useEffect(() => {
     if (battleData?.question && language) {
       setCode(getCodePlaceholder(language, battleData.question));
-      setTestResults([]); 
     }
   }, [language, battleData?.question]);
-
-  const handleRunTests = async () => { /* Test running logic unchanged for now */ };
 
   const onLanguageChange = async (newLang: SupportedLanguage) => {
     if (!player || !battleData) return;
@@ -614,245 +558,72 @@ export default function ArenaPage() {
   }
 
   const renderContent = () => {
-    
-    if (gameState === 'selectingLobby') {
-      return (
-        <div className="container mx-auto py-8 h-full flex flex-col justify-center">
-          <Card className="mb-8 shadow-lg">
-            <CardHeader className="text-center">
-              <Swords className="h-16 w-16 mx-auto text-primary mb-4"/>
-              <CardTitle className="text-3xl font-bold">Choose Your Arena</CardTitle>
-              <CardDescription className="text-lg">Select a lobby. Entry fees apply. Current Coins: {player?.coins ?? 0} <CoinsIcon className="inline h-5 w-5 text-yellow-500 align-text-bottom" /></CardDescription>
-            </CardHeader>
-            <CardContent className="grid md:grid-cols-3 gap-6">
-              {LOBBIES.map(lobby => (
-                <LobbyCard key={lobby.name} lobby={lobby} onSelectLobby={handleSelectLobby} disabled={!player || player.coins < lobby.entryFee}/>
-              ))}
-            </CardContent>
-          </Card>
-           {!IS_FIREBASE_CONFIGURED && (
-                <Alert variant="destructive" className="max-w-md mx-auto mt-4">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>Developer Notice: Live PvP Disabled</AlertTitle>
-                  <AlertDescription>
-                    No Firebase credentials found. The app is running in offline bot mode. You will play against a bot.
-                  </AlertDescription>
-                </Alert>
-            )}
-        </div>
-      );
-    }
-    
-    if (gameState === 'searching') {
-      return (
-        <div className="flex flex-col items-center justify-center h-full text-center p-4">
-          <Loader2 className="h-16 w-16 animate-spin text-primary mb-6" />
-          <h2 className="text-2xl font-semibold text-foreground mb-2">Waiting for an Opponent...</h2>
-          <p className="text-muted-foreground">Searching in the <span className="font-medium text-primary">{selectedLobbyName}</span> lobby.</p>
-          <Button variant="outline" onClick={() => setShowLeaveConfirm(true)} className="mt-6">
-              <LogOut className="mr-2 h-4 w-4" /> Cancel Search
-          </Button>
-        </div>
-      );
-    }
-
-    if (gameState === 'submittingComparison') {
-      return (
-        <div className="flex flex-col items-center justify-center h-full text-center p-4">
-          <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
-          <h2 className="text-2xl font-semibold text-foreground mb-2">Duel Concluded: AI is Comparing Submissions...</h2>
-          <p className="text-muted-foreground">Our AI is evaluating both solutions to determine the victor. This may take a moment.</p>
-        </div>
-      );
-    }
-
-    if (gameState === 'gameOver' && battleData) {
-      const outcome = battleData.winnerId === player?.id ? 'win' : (!battleData.winnerId ? 'draw' : 'loss');
-      let title = "Match Over";
-      let message = "";
-      let icon: React.ReactNode = <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
-      const opponent = battleData.player1.id === player?.id ? battleData.player2 : battleData.player1;
-
-      if(battleData.status === 'forfeited'){
-          title = outcome === 'win' ? "Victory by Forfeit!" : "Match Forfeited";
-          message = outcome === 'win' ? `Your opponent forfeited. You won the wager!` : `You forfeited the match and lost your wager.`;
-          icon = outcome === 'win' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4"/> : <Flag className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
-      } else { // 'completed'
-          title = outcome === 'win' ? 'Victory!' : (outcome === 'draw' ? "It's a Draw!" : "Defeat!");
-          message = outcome === 'win' ? `You defeated ${opponent?.username || 'your opponent'}!` : (outcome === 'draw' ? `The duel ended in a draw.` : `${opponent?.username || 'Your opponent'} won the duel.`);
-          icon = outcome === 'win' ? <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4"/> : (outcome === 'draw' ? <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4"/> : <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4"/>);
-      }
-      
-      const comparisonResult = battleData.comparisonResult;
-      const player1 = battleData.player1;
-      const player2 = battleData.player2!;
-      const player1Eval = comparisonResult?.player1Evaluation;
-      const player2Eval = comparisonResult?.player2Evaluation;
-
-      return (
-        <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
-          <Card>
-            <CardHeader className="text-center">
-              {icon}
-              <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
-              <CardDescription className="text-lg text-muted-foreground">{message}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {comparisonResult && player1Eval && player2Eval && (
-                 <Accordion type="single" collapsible className="w-full" defaultValue="comparison-details">
-                  <AccordionItem value="comparison-details">
-                    <AccordionTrigger className="text-lg hover:no-underline"><Brain className="mr-2 h-5 w-5 text-primary"/> Detailed AI Duel Report</AccordionTrigger>
-                    <AccordionContent className="space-y-4 pt-4">
-                       <Card className="bg-muted/30">
-                          <CardHeader>
-                            <CardTitle className="text-xl">Duel Summary</CardTitle>
-                          </CardHeader>
-                          <CardContent className="space-y-2 text-sm">
-                            <p><strong className="text-foreground">Winning Reason:</strong> {comparisonResult.winningReason}</p>
-                            <p><strong className="text-foreground">Comparison:</strong> {comparisonResult.comparisonSummary}</p>
-                          </CardContent>
-                       </Card>
-
-                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        {[
-                          {player: player1, evaluation: player1Eval, title: `${player1.username} ${player1.id === player?.id ? '(You)' : ''}`},
-                          {player: player2, evaluation: player2Eval, title: `${player2.username} ${player2.id === player?.id ? '(You)' : ''}`}
-                        ].map((data, index) => (
-                           <Card key={index} className={cn("flex flex-col", battleData.winnerId === data.player.id ? 'border-green-500' : battleData.winnerId && 'opacity-70')}>
-                             <CardHeader>
-                               <CardTitle className="flex items-center justify-between">
-                                  <span>{data.title}</span>
-                                  {data.evaluation.isPotentiallyCorrect ? 
-                                    <Badge variant="default" className="bg-green-500 hover:bg-green-600"><CheckCircle className="mr-1 h-4 w-4"/> Correct</Badge> : 
-                                    <Badge variant="destructive"><XCircle className="mr-1 h-4 w-4"/> Incorrect</Badge>
-                                  }
-                               </CardTitle>
-                             </CardHeader>
-                             <CardContent className="flex-grow">
-                                <Tabs defaultValue="feedback">
-                                    <TabsList className="grid w-full grid-cols-2">
-                                        <TabsTrigger value="feedback">AI Feedback</TabsTrigger>
-                                        <TabsTrigger value="code"><FileCode className="mr-1 h-4 w-4"/> Code</TabsTrigger>
-                                    </TabsList>
-                                    <TabsContent value="feedback" className="text-sm space-y-3 mt-4">
-                                        <p><strong className="text-foreground">Correctness:</strong> {data.evaluation.correctnessExplanation}</p>
-                                        <div><strong className="text-foreground">Time Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedTimeComplexity}</Badge></div>
-                                        <div><strong className="text-foreground">Space Complexity:</strong> <Badge variant="secondary">{data.evaluation.estimatedSpaceComplexity}</Badge></div>
-                                        <p><strong className="text-foreground">Overall Assessment:</strong> {data.evaluation.overallAssessment}</p>
-                                        <div>
-                                          <strong className="text-foreground">Code Quality Feedback:</strong>
-                                          <ScrollArea className="h-24 mt-1 rounded-md border bg-background/50 p-2 text-xs">
-                                              <pre className="whitespace-pre-wrap font-sans">{data.evaluation.codeQualityFeedback}</pre>
-                                          </ScrollArea>
-                                        </div>
-                                    </TabsContent>
-                                    <TabsContent value="code" className="mt-2">
-                                        <div className="h-64 w-full border rounded-md overflow-hidden">
-                                          <CodeEditor
-                                            value={data.player.code || ''}
-                                            language={data.player.language}
-                                            readOnly={true}
-                                            height="256px"
-                                          />
-                                        </div>
-                                    </TabsContent>
-                                </Tabs>
-                             </CardContent>
-                           </Card>
-                        ))}
-                       </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                </Accordion>
-              )}
-               <div className="text-center text-muted-foreground">Your coins: {player?.coins ?? 0} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/></div>
-              <div className="flex flex-col sm:flex-row gap-4 pt-4">
-                <Button asChild variant="outline" className="w-full">
-                  <Link href="/dashboard">Return to Dashboard</Link>
-                </Button>
-                <Button onClick={() => resetGameState(true)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
-                  Find New Match
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )
-    }
-
-    if (gameState === 'inGame' && battleData && player) {
-      const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
-      const me = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
-      
-      if (!opponent) return <div className="flex items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary mr-2"/>Waiting for opponent...</div>;
-      
-      return (
-        <div className="flex flex-col gap-4 h-full p-4 md:p-6">
-          <Card className="shadow-md shrink-0">
-             <CardContent className="p-3 flex justify-around items-center text-sm">
-                {/* Player 1 Info */}
-                <div className="flex items-center gap-2"><UserSquare2 className="h-8 w-8 text-blue-500" /><p className="font-semibold text-foreground">{battleData.player1.username}</p></div>
-                <div className="text-center"><Swords className="h-6 w-6 text-muted-foreground mx-auto"/><p className="text-xs text-primary font-medium">{battleData.difficulty}</p></div>
-                {/* Player 2 Info */}
-                <div className="flex items-center gap-2"><UserSquare2 className="h-8 w-8 text-red-500" /><p className="font-semibold text-foreground">{battleData.player2?.username || '???'}</p></div>
-             </CardContent>
-          </Card>
-
-          <div className="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
-              <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-                <CardHeader className="bg-card-foreground/5">
-                    <div className="flex justify-between items-center">
-                        <CardTitle className="text-2xl text-primary">Coding Challenge</CardTitle>
-                        <GameTimer initialTime={timeRemaining} onTimeUp={handleTimeUp} />
-                    </div>
-                </CardHeader>
-                <CardContent className="p-0 flex-grow overflow-y-auto">
-                    <ProblemDisplay question={battleData.question} />
-                </CardContent>
-              </Card>
-
-              <Card className="lg:w-1/2 flex flex-col shadow-xl overflow-hidden">
-                <CardHeader className="bg-card-foreground/5">
-                    <div className="flex justify-between items-center">
-                      <div className="flex items-center gap-2"><CardTitle className="text-2xl">Your Solution</CardTitle></div>
-                      <Select value={language} onValueChange={onLanguageChange} disabled={me?.hasSubmitted}>
-                          <SelectTrigger className="w-[180px] bg-background"><SelectValue placeholder="Select language" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="javascript">JavaScript</SelectItem>
-                            <SelectItem value="python">Python</SelectItem>
-                            <SelectItem value="cpp">C++</SelectItem>
-                          </SelectContent>
-                      </Select>
-                    </div>
-                    {opponent.hasSubmitted && !me?.hasSubmitted && <p className="mt-2 text-sm text-yellow-600 animate-pulse">Opponent has submitted!</p>}
-                    {me?.hasSubmitted && !opponent.hasSubmitted && <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for opponent...</p>}
-                </CardHeader>
-                <div className="flex-grow min-h-0">
-                    <CodeEditor
-                        value={code}
-                        onChange={setCode}
-                        language={language}
-                        readOnly={me?.hasSubmitted}
-                    />
+    switch (gameState) {
+        case 'selectingLobby':
+            return (
+                <LobbySelection
+                    lobbies={LOBBIES}
+                    player={player}
+                    onSelectLobby={handleSelectLobby}
+                    isFirebaseConfigured={IS_FIREBASE_CONFIGURED}
+                />
+            );
+        case 'searching':
+            return (
+                <SearchingView
+                    selectedLobbyName={selectedLobbyName}
+                    onCancelSearch={() => setShowLeaveConfirm(true)}
+                />
+            );
+        case 'inGame':
+            if (!battleData || !player) {
+                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading match...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
+            }
+            return (
+                <DuelView
+                    battleData={battleData}
+                    player={player}
+                    timeRemaining={timeRemaining}
+                    code={code}
+                    onCodeChange={setCode}
+                    language={language}
+                    onLanguageChange={onLanguageChange}
+                    onSubmitCode={handleSubmitCode}
+                    onTimeUp={handleTimeUp}
+                    onForfeit={() => setShowLeaveConfirm(true)}
+                />
+            );
+        case 'submittingComparison':
+            return (
+                <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                    <Sparkles className="h-16 w-16 animate-pulse text-accent mb-6" />
+                    <h2 className="text-2xl font-semibold text-foreground mb-2">Duel Concluded: AI is Comparing Submissions...</h2>
+                    <p className="text-muted-foreground">Our AI is evaluating both solutions to determine the victor. This may take a moment.</p>
                 </div>
-                 <div className="p-4 border-t flex flex-col gap-2">
-                    <Button onClick={handleSubmitCode} disabled={me?.hasSubmitted || !code.trim()} className="w-full">
-                        {me?.hasSubmitted ? "Code Submitted" : "Submit for Final AI Duel"}
-                    </Button>
-                    <Button variant="outline" onClick={() => setShowLeaveConfirm(true)} disabled={me?.hasSubmitted} className="w-full">
-                        <Flag className="mr-2 h-4 w-4" /> Forfeit Match
-                    </Button>
-                 </div>
-              </Card>
-          </div>
-        </div>
-      );
+            );
+        case 'gameOver':
+            if (!battleData || !player) {
+                // Fallback if somehow we get here without data
+                return (
+                    <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                        <p className="mb-4">Match data not found.</p>
+                        <Button onClick={() => resetGameState(true)}>Return to Lobby</Button>
+                    </div>
+                );
+            }
+            return (
+                <GameOverReport
+                    battleData={battleData}
+                    player={player}
+                    onFindNewMatch={() => resetGameState(true)}
+                />
+            );
+        default:
+            return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
     }
-    
-    return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading match...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
   }
 
-  const isFullScreenState = gameState === 'searching' || gameState === 'inGame' || gameState === 'submittingComparison' || gameState === 'gameOver';
+  const isFullScreenState = gameState !== 'selectingLobby';
 
   return (
     <>
