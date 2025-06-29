@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -11,9 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, ShieldCheck, ShieldAlert, CheckCircle, ArrowLeft } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 export default function KycPage() {
-  const { player, setPlayer, isLoading } = useAuth();
+  const { player, isLoading } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -30,7 +35,19 @@ export default function KycPage() {
     // Simulate network delay and verification process
     await new Promise(resolve => setTimeout(resolve, 2500));
 
-    setPlayer({ ...player, isKycVerified: true });
+    if (IS_FIREBASE_CONFIGURED) {
+      try {
+        const playerRef = doc(db, "players", player.id);
+        await updateDoc(playerRef, { isKycVerified: true });
+      } catch (error) {
+         console.error("KYC update failed:", error);
+         toast({ title: "Error", description: "Failed to update your verification status.", variant: "destructive"});
+         setIsSubmitting(false);
+         return;
+      }
+    }
+    
+    // Auth context will update automatically via its real-time listener
     toast({
       title: "Verification Successful!",
       description: "You are now KYC verified and can redeem winnings.",

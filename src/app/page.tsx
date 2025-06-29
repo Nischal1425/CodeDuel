@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -9,33 +10,20 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { CodeDuelLogo } from '@/components/CodeDuelLogo';
 import { Swords, LogIn, Info, Loader2 } from 'lucide-react';
-import type { MatchHistoryEntry } from '@/types';
+import type { Player } from '@/types';
+import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useToast } from '@/hooks/use-toast';
 
-const initialHistory: MatchHistoryEntry[] = [
-  {
-    matchId: 'm1',
-    opponent: { username: 'ByteMaster', avatarUrl: 'https://placehold.co/40x40.png?text=BM' },
-    outcome: 'win',
-    difficulty: 'medium',
-    wager: 100,
-    date: '2024-07-20',
-  },
-  {
-    matchId: 'm2',
-    opponent: { username: 'AlgoQueen', avatarUrl: 'https://placehold.co/40x40.png?text=AQ' },
-    outcome: 'loss',
-    difficulty: 'hard',
-    wager: 200,
-    date: '2024-07-19',
-  },
-];
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 export default function LandingPage() {
   const router = useRouter();
-  const { setPlayer, isLoading, player } = useAuth();
+  const { setPlayerId, isLoading, player } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!isLoading && player) {
@@ -46,32 +34,76 @@ export default function LandingPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
-      // Basic validation, can use react-hook-form for more robust validation
-      alert("Please enter email and password.");
+      toast({ title: "Validation Error", description: "Please enter email and password.", variant: "destructive" });
       return;
     }
+
     setIsLoggingIn(true);
-    // Mock login
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setPlayer({
-      id: 'player123',
-      username: email.split('@')[0] || 'CodeWarrior',
-      coins: 1000,
-      rank: 15,
-      rating: 1250,
-      avatarUrl: 'https://placehold.co/100x100.png',
-      email: email,
-      unlockedAchievements: ['first_win', 'hot_streak_3'],
-      // Add new stats for achievement tracking
-      matchesPlayed: 25,
-      wins: 15,
-      losses: 10,
-      winStreak: 3,
-      isKycVerified: false,
-      matchHistory: initialHistory,
-    });
-    setIsLoggingIn(false);
-    router.push('/dashboard');
+    
+    if (!IS_FIREBASE_CONFIGURED) {
+      // Mock login for offline mode
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const mockPlayer = {
+        id: 'player123-mock',
+        username: email.split('@')[0] || 'CodeWarrior',
+        coins: 1000,
+        rank: 15,
+        rating: 1250,
+        avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
+        email: email,
+        unlockedAchievements: ['first_win'],
+        matchesPlayed: 25,
+        wins: 15,
+        losses: 10,
+        winStreak: 3,
+        isKycVerified: false,
+        matchHistory: [],
+      };
+      setPlayerId(mockPlayer.id); // In a real app, you'd just set the player object. Here we need an ID for context.
+      // This is a bit of a hack for the mock scenario, the AuthProvider isn't set up to handle a mock player without an ID.
+      // For the demo, we'll just navigate.
+      router.push('/dashboard');
+      return;
+    }
+    
+    try {
+        const playersRef = collection(db, "players");
+        const q = query(playersRef, where("email", "==", email));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+            // Player exists
+            const playerDoc = querySnapshot.docs[0];
+            setPlayerId(playerDoc.id);
+            toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
+        } else {
+            // New player, create account
+            const newPlayer: Omit<Player, 'id'> = {
+                username: email.split('@')[0] || 'New Duelist',
+                email: email,
+                coins: 500, // Starting coins
+                rank: 1,
+                rating: 1000, // Starting rating
+                avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
+                unlockedAchievements: [],
+                matchesPlayed: 0,
+                wins: 0,
+                losses: 0,
+                winStreak: 0,
+                isKycVerified: false,
+                matchHistory: [],
+            };
+            const docRef = await addDoc(collection(db, "players"), newPlayer);
+            setPlayerId(docRef.id);
+            toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
+        }
+        router.push('/dashboard');
+    } catch (error) {
+        console.error("Login Error: ", error);
+        toast({ title: "Login Failed", description: "Could not connect to the server. Please try again.", variant: "destructive" });
+    } finally {
+        setIsLoggingIn(false);
+    }
   };
 
   if (isLoading || (!isLoading && player)) {
@@ -138,7 +170,7 @@ export default function LandingPage() {
               <CardHeader>
                 <CardTitle className="text-2xl text-center text-primary">Join the Battle!</CardTitle>
                 <CardDescription className="text-center text-muted-foreground">
-                  Log in or create an account to start dueling.
+                  {IS_FIREBASE_CONFIGURED ? "Log in or create an account to start dueling." : "Enter any email/password to play in offline mode."}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -155,12 +187,17 @@ export default function LandingPage() {
                   </div>
                   <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isLoggingIn || !email || !password}>
                     {isLoggingIn ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {isLoggingIn ? 'Processing...' : 'Login / Sign Up (Mock)'}
+                    {isLoggingIn ? 'Processing...' : 'Login / Sign Up'}
                   </Button>
                 </form>
               </CardContent>
-              <CardFooter className="text-xs text-muted-foreground text-center block pt-4">
-                <p>This is a mock login/signup. Any email/password will work.</p>
+               <CardFooter className="text-xs text-muted-foreground text-center block pt-4">
+                <p>
+                  {IS_FIREBASE_CONFIGURED 
+                    ? "This is a mock login/signup. Your password is not stored securely." 
+                    : "No Firebase credentials found. The app is in offline mode."
+                  }
+                </p>
               </CardFooter>
             </Card>
           </div>

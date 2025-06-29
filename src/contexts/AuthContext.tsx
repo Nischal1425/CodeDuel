@@ -4,37 +4,73 @@
 import type { Player } from '@/types';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation'; // Import for logout redirect if needed later
+import { db } from '@/lib/firebase';
+import { doc, onSnapshot } from "firebase/firestore";
+
 
 interface AuthContextType {
   player: Player | null;
   setPlayer: Dispatch<SetStateAction<Player | null>>;
   isLoading: boolean;
   logout: () => void; 
+  setPlayerId: (id: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [player, setPlayer] = useState<Player | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // Start true, set to false after check
-  // const router = useRouter(); // Uncomment if logout needs to redirect from here
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // In a real app, you might check localStorage/session here for a persisted user
-    // For this mock, we assume the user is not logged in initially.
-    // Login will occur on the landing page.
-    setIsLoading(false);
+    const storedPlayerId = sessionStorage.getItem('playerId');
+    if (storedPlayerId) {
+      setPlayerId(storedPlayerId);
+    } else {
+      setIsLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    if (playerId) {
+      const unsub = onSnapshot(doc(db, "players", playerId), (doc) => {
+        if (doc.exists()) {
+          setPlayer({ id: doc.id, ...doc.data() } as Player);
+        } else {
+          // Player document was deleted or doesn't exist.
+          logout();
+        }
+        setIsLoading(false);
+      }, (error) => {
+        console.error("Error listening to player document:", error);
+        logout();
+        setIsLoading(false);
+      });
+
+      return () => unsub(); // Cleanup listener on component unmount
+    } else {
+        setPlayer(null);
+    }
+  }, [playerId]);
+
+  const handleSetPlayerId = (id: string | null) => {
+    if (id) {
+        sessionStorage.setItem('playerId', id);
+        setPlayerId(id);
+    } else {
+        sessionStorage.removeItem('playerId');
+        setPlayerId(null);
+    }
+  };
+
+
   const logout = () => {
-    setPlayer(null);
-    // router.push('/'); // Optional: redirect to landing page after logout
-    // Any other cleanup like clearing local storage tokens would go here
+    handleSetPlayerId(null);
   };
 
   return (
-    <AuthContext.Provider value={{ player, setPlayer, isLoading, logout }}>
+    <AuthContext.Provider value={{ player, setPlayer, isLoading, logout, setPlayerId: handleSetPlayerId }}>
       {children}
     </AuthContext.Provider>
   );

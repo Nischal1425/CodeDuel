@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -18,6 +19,8 @@ import type { Achievement as AchievementType, Player } from '@/types';
 import { cn } from '@/lib/utils';
 import { useToast } from "@/hooks/use-toast";
 import { generateAvatar } from '@/ai/flows/generate-avatar';
+import { db } from '@/lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 
 const getAchievementProgress = (player: Player, achievement: AchievementType) => {
   if (!achievement.stat) return { current: 0, goal: achievement.goal, percent: 0 };
@@ -48,11 +51,12 @@ function InfoItem({ icon, label, value }: InfoItemProps) {
 }
 
 export default function ProfilePage() {
-  const { player, isLoading, setPlayer } = useAuth();
+  const { player, isLoading, setPlayer } = useAuth(); // setPlayer is for local optimistic updates
   const { toast } = useToast();
   const [prompt, setPrompt] = useState('');
   const [generatedAvatar, setGeneratedAvatar] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const handleGenerateAvatar = async () => {
       if (!prompt.trim()) {
@@ -77,13 +81,31 @@ export default function ProfilePage() {
       }
   };
 
-  const handleSetAvatar = () => {
+  const handleSetAvatar = async () => {
       if (!generatedAvatar || !player) return;
-      setPlayer({ ...player, avatarUrl: generatedAvatar });
-      toast({
-          title: "Profile Picture Updated!",
-          className: "bg-green-500 text-white",
-      });
+      setIsUpdating(true);
+      
+      try {
+          const playerRef = doc(db, "players", player.id);
+          await updateDoc(playerRef, {
+              avatarUrl: generatedAvatar
+          });
+          
+          // Optimistically update local state via AuthContext.
+          // The real-time listener will also catch this, but this makes the UI feel faster.
+          setPlayer({ ...player, avatarUrl: generatedAvatar });
+
+          toast({
+              title: "Profile Picture Updated!",
+              className: "bg-green-500 text-white",
+          });
+          setGeneratedAvatar(null); // Clear the generated image
+      } catch (error) {
+          console.error("Error updating avatar:", error);
+          toast({ title: "Update Failed", description: "Could not save your new avatar. Please try again.", variant: "destructive" });
+      } finally {
+          setIsUpdating(false);
+      }
   };
 
   if (isLoading) {
@@ -235,13 +257,13 @@ export default function ProfilePage() {
                       placeholder="e.g., a cosmic owl, a robot knight, a wizard made of code"
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
-                      disabled={isGenerating}
+                      disabled={isGenerating || isUpdating}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
                       Unleash your creativity! Let our AI craft a unique avatar for you.
                     </p>
                   </div>
-                  <Button onClick={handleGenerateAvatar} disabled={isGenerating || !prompt.trim()}>
+                  <Button onClick={handleGenerateAvatar} disabled={isGenerating || !prompt.trim() || isUpdating}>
                     {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImageIcon className="mr-2 h-4 w-4" />}
                     {isGenerating ? 'Generating...' : 'Generate Avatar'}
                   </Button>
@@ -256,8 +278,9 @@ export default function ProfilePage() {
                       <ImageIcon className="h-8 w-8 text-muted-foreground" />
                     )}
                   </div>
-                  <Button onClick={handleSetAvatar} disabled={!generatedAvatar || isGenerating} size="sm" variant="outline">
-                    Set as Profile Picture
+                  <Button onClick={handleSetAvatar} disabled={!generatedAvatar || isGenerating || isUpdating} size="sm" variant="outline">
+                    {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                    {isUpdating ? 'Saving...' : 'Set as Profile Picture'}
                   </Button>
                 </div>
               </CardContent>

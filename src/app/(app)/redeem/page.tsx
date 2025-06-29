@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -10,12 +11,15 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Gift, ShieldAlert, ArrowLeft, Coins as CoinsIcon, Banknote } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { db } from '@/lib/firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 
 const MIN_REDEEM = 5000;
 const REDEEM_RATE_INR_PER_100_COINS = 8; // e.g., 8 rupees per 100 coins
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 export default function RedeemPage() {
-  const { player, setPlayer, isLoading } = useAuth();
+  const { player, isLoading } = useAuth();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [amountToRedeem, setAmountToRedeem] = useState<number | string>("");
@@ -43,10 +47,22 @@ export default function RedeemPage() {
 
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    setPlayer({ ...player, coins: player.coins - amountToRedeem });
+    if (IS_FIREBASE_CONFIGURED) {
+        try {
+            const playerRef = doc(db, "players", player.id);
+            await updateDoc(playerRef, { coins: player.coins - amountToRedeem });
+        } catch (error) {
+            console.error("Redeem failed:", error);
+            toast({ title: "Error", description: "Could not process your redemption request.", variant: "destructive" });
+            setIsSubmitting(false);
+            return;
+        }
+    }
+    
+    // Auth context will update automatically via real-time listener
     toast({
       title: "Redemption Successful!",
-      description: `${amountToRedeem} coins have been redeemed. Your new balance is ${player.coins - amountToRedeem}.`,
+      description: `${amountToRedeem} coins have been redeemed.`,
       className: "bg-green-500 text-white",
     });
     setAmountToRedeem("");
