@@ -17,10 +17,13 @@ import Link from 'next/link';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { CodeEditor } from '@/app/(app)/arena/_components/CodeEditor';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const COOLDOWN_DURATION_HOURS = 3;
 const COOLDOWN_REWARD_COINS = 50;
 const ELIGIBILITY_COIN_THRESHOLD = 50;
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 // A simple function to convert markdown-like text to styled HTML.
 const formatProblemStatement = (statement: string): string => {
@@ -167,12 +170,19 @@ export default function CooldownChallengePage() {
       setSubmissionEvaluation(evaluation);
 
       if (evaluation.isPotentiallyCorrect) {
-        const updatedPlayer = { ...player, coins: player.coins + COOLDOWN_REWARD_COINS };
-        setPlayer(updatedPlayer);
+        const updatedCoins = player.coins + COOLDOWN_REWARD_COINS;
+
+        if (IS_FIREBASE_CONFIGURED) {
+            const playerRef = doc(db, "players", player.id);
+            await updateDoc(playerRef, { coins: updatedCoins });
+        }
+        
+        // Optimistically update local state for immediate UI feedback
+        setPlayer({ ...player, coins: updatedCoins });
         
         toast({
           title: "Challenge Completed!",
-          description: `You've earned ${COOLDOWN_REWARD_COINS} coins! Your new balance: ${updatedPlayer.coins}`,
+          description: `You've earned ${COOLDOWN_REWARD_COINS} coins! Your new balance: ${updatedCoins}`,
           className: "bg-green-500 text-white",
         });
         localStorage.setItem('lastCooldownChallengeTimestamp', Date.now().toString());
@@ -224,7 +234,7 @@ export default function CooldownChallengePage() {
                     <p className="text-md">
                         You currently have {player.coins} <CoinsIcon className="inline h-4 w-4 text-yellow-500 align-baseline"/>.
                     </p>
-                    <Alert variant="default" className="bg-primary/10 border-primary/30 text-primary-foreground">
+                    <Alert variant="default" className="bg-primary/10 border-primary/30">
                         <Info className="h-5 w-5 text-primary" />
                         <AlertTitle className="text-primary">Ready for Action?</AlertTitle>
                         <AlertDescription className="text-primary/90">
@@ -334,9 +344,9 @@ export default function CooldownChallengePage() {
                     <Badge className="capitalize bg-green-500 text-white hover:bg-green-600">{challenge.difficulty}</Badge>
                 </div>
             </CardHeader>
-            <CardContent className="prose prose-sm max-w-none text-foreground/90">
+            <CardContent>
                 <ScrollArea className="h-48 p-1">
-                 <div dangerouslySetInnerHTML={{ __html: formattedStatement }} />
+                 <div className="prose prose-sm max-w-none text-foreground/90" dangerouslySetInnerHTML={{ __html: formattedStatement }} />
                 </ScrollArea>
             </CardContent>
           </Card>
@@ -379,7 +389,7 @@ export default function CooldownChallengePage() {
                     
                     <h4 className="font-semibold text-md text-foreground pt-2">Quality Feedback:</h4>
                     <ScrollArea className="h-24 p-2 border rounded-md bg-background">
-                        <pre className="whitespace-pre-wrap">{submissionEvaluation.codeQualityFeedback}</pre>
+                        <pre className="whitespace-pre-wrap font-sans">{submissionEvaluation.codeQualityFeedback}</pre>
                     </ScrollArea>
                 </CardContent>
               </Card>
