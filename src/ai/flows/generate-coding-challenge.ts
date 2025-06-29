@@ -34,7 +34,7 @@ export type TestCase = z.infer<typeof TestCaseSchema>;
 const GenerateCodingChallengeOutputSchema = z.object({
   problemStatement: z
     .string()
-    .describe('The coding problem statement, including input and output specifications, constraints, and clear examples. This statement should be language-agnostic enough to be solvable in JavaScript, Python, or C++. It should clearly define the conceptual input parameters and their types.'),
+    .describe('A coding problem statement formatted in Markdown. It MUST include the following sections, each starting with a "###" heading: "### Description", "### Examples", and "### Constraints". Under "### Examples", format each example clearly with sections like "**Input:**" and "**Output:**", using Markdown code blocks (```) for the code/data itself.'),
   difficulty: z.enum(['easy', 'medium', 'hard']).describe('The difficulty level of the problem, matching the targetDifficulty.'),
   solution: z.string().describe('The reference solution code for the problem, primarily in JavaScript. This solution function MUST be named `solve` and accept a single argument `params`. If the problem has multiple conceptual inputs (e.g. `nums`, `target`), `params` will be an object like `{ "nums": ..., "target": ...}`. If it has a single primitive input, `params` will be that primitive.'),
   testCases: z.array(TestCaseSchema).min(2).max(4).describe("An array of 2 to 4 public test cases. Each test case should include a name, string input (JSON string for complex inputs with named parameters, or primitive string for simple inputs), string expectedOutput (JSON string for complex outputs, or primitive string for simple outputs), and isPublic flag."),
@@ -66,7 +66,10 @@ Target Difficulty: {{{targetDifficulty}}}
 Preferred Solution Language (for reference solution): JavaScript
 
 Generate a coding problem with the following specifications:
-- problemStatement: A clear and concise description of the coding problem. Include detailed input and output specifications (clearly defining conceptual input parameters and their types), constraints, and at least one clear example with input and expected output. Ensure the problem statement is understandable and solvable by someone using JavaScript, Python, or C++.
+- problemStatement: A clear description of the coding problem, formatted in Markdown. This string **MUST** include the following sections, each starting with a '###' heading: \`### Description\`, \`### Examples\`, and \`### Constraints\`.
+    - Under \`### Description\`, provide a detailed, language-agnostic description of the task.
+    - Under \`### Examples\`, provide at least one clear example. Format each example with bolded labels like \`**Input:**\`, \`**Output:**\`, and optionally \`**Explanation:**\`. Use markdown code blocks (\`\`\` or \`) for the data itself.
+    - Under \`### Constraints\`, provide a bulleted list of constraints (e.g., '- \`1 <= nums.length <= 1000\`').
 - difficulty: The difficulty level of the problem (must be exactly 'easy', 'medium', or 'hard', matching the targetDifficulty).
 - solution: A reference solution code for the problem, written in JavaScript. The primary JavaScript solution function *must* be named 'solve' and accept a single argument 'params'.
     - If the problem involves multiple conceptual inputs (e.g., an array \`nums\` and an integer \`target\`), the \`params\` argument for the \`solve\` function will be an object like \`{ "nums": [1,2,3], "target": 5 }\`. The \`solve\` function must then extract these (e.g., \`const nums = params.nums;\`).
@@ -151,4 +154,3 @@ const generateCodingChallengeFlow = ai.defineFlow(
     return output; // No longer using 'output!' as we've checked for !output above.
   }
 );
-

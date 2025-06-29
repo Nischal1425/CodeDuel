@@ -15,47 +15,15 @@ import type { EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-subm
 import { evaluateCodeSubmission } from '@/ai/flows/evaluate-code-submission';
 import Link from 'next/link';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
 import { CodeEditor } from '@/app/(app)/arena/_components/CodeEditor';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { ProblemDisplay } from '../arena/_components/ProblemDisplay';
 
 const COOLDOWN_DURATION_HOURS = 3;
 const COOLDOWN_REWARD_COINS = 50;
 const ELIGIBILITY_COIN_THRESHOLD = 50;
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-
-// A simple function to convert markdown-like text to styled HTML.
-const formatProblemStatement = (statement: string): string => {
-  const html = statement
-    // Bold
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    // Inline code
-    .replace(/`([^`]+?)`/g, '<code class="font-mono bg-muted/70 text-foreground/80 rounded-sm px-1.5 py-1 text-xs">$1</code>')
-    // Headings (e.g., ### Constraints)
-    .replace(/^###\s+(.*)/gm, '<h3>$1</h3>')
-    // Code blocks (e.g., ```javascript ... ```)
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
-    // Unordered lists
-    .replace(/^\s*[-*]\s+(.*)/gm, '<li>$1</li>')
-    // Wrap consecutive list items in <ul>
-    .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-    // Handle paragraphs and line breaks
-    .split('\n\n')
-    .map(p => p.trim())
-    .filter(p => p)
-    .map(p => {
-        if (p.startsWith('<ul>') || p.startsWith('<h3>') || p.startsWith('<pre>')) {
-            return p;
-        }
-        // Replace single newlines with <br> for line breaks within a paragraph
-        return `<p>${p.replace(/\n/g, '<br />')}</p>`;
-    })
-    .join('');
-
-  return html;
-};
-
 
 export default function CooldownChallengePage() {
   const { toast } = useToast();
@@ -323,11 +291,9 @@ export default function CooldownChallengePage() {
         </div>
     );
   }
-
-  const formattedStatement = formatProblemStatement(challenge.problemStatement);
-
+  
   return (
-    <div className="container mx-auto max-w-3xl py-8">
+    <div className="container mx-auto max-w-4xl py-8 flex flex-col gap-6">
       <Card className="shadow-xl border-primary/20">
         <CardHeader className="items-center text-center bg-gradient-to-br from-primary/80 via-primary/60 to-primary/80 text-primary-foreground py-10 rounded-t-lg">
           <ShieldQuestion className="h-16 w-16 mb-4 opacity-90" />
@@ -336,66 +302,64 @@ export default function CooldownChallengePage() {
             Solve this challenge (scaled to your rank) to earn {COOLDOWN_REWARD_COINS} coins!
           </CardDescription>
         </CardHeader>
-        <CardContent className="p-6 md:p-8 space-y-6">
-          <Card className="bg-muted/20">
-            <CardHeader>
-                <div className="flex justify-between items-center">
-                    <CardTitle className="text-xl font-semibold text-foreground">Problem: {challenge.difficulty} difficulty</CardTitle>
-                    <Badge className="capitalize bg-green-500 text-white hover:bg-green-600">{challenge.difficulty}</Badge>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <ScrollArea className="h-48 p-1">
-                 <div className="prose prose-sm max-w-none text-foreground/90" dangerouslySetInnerHTML={{ __html: formattedStatement }} />
-                </ScrollArea>
-            </CardContent>
-          </Card>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="code-editor" className="block text-sm font-medium text-foreground mb-1">
-                Your Solution (JavaScript):
-              </label>
-              <div className="h-[250px] w-full border rounded-md overflow-hidden">
-                <CodeEditor
-                  value={code}
-                  onChange={setCode}
-                  language="javascript"
-                  readOnly={isSubmitting}
-                  height="250px"
-                />
-              </div>
-            </div>
-            <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isSubmitting || !code.trim()}>
-              {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Submit Solution for AI Evaluation
-            </Button>
-          </form>
-
-          {submissionEvaluation && (
-             <Card className="bg-muted/50 mt-6">
-                <CardHeader>
-                  <CardTitle className="text-xl flex items-center"><Brain className="mr-2 h-5 w-5 text-primary"/> AI Analysis Report</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                        <span className="font-medium text-foreground">AI Assessment:</span>
-                        <Badge variant={submissionEvaluation.isPotentiallyCorrect ? "default" : "destructive"} className={submissionEvaluation.isPotentiallyCorrect ? "bg-green-500 hover:bg-green-600 text-white" : ""}>
-                            {submissionEvaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}
-                        </Badge>
-                    </div>
-                    <p><span className="font-medium text-foreground">Explanation:</span> {submissionEvaluation.correctnessExplanation}</p>
-                    <p><span className="font-medium text-foreground">Summary:</span> {submissionEvaluation.overallAssessment}</p>
-                    
-                    <h4 className="font-semibold text-md text-foreground pt-2">Quality Feedback:</h4>
-                    <ScrollArea className="h-24 p-2 border rounded-md bg-background">
-                        <pre className="whitespace-pre-wrap font-sans">{submissionEvaluation.codeQualityFeedback}</pre>
-                    </ScrollArea>
-                </CardContent>
-              </Card>
-          )}
-        </CardContent>
       </Card>
+      
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Card className="flex-grow">
+          <CardContent className="p-0 h-[500px]">
+             <ProblemDisplay question={challenge} />
+          </CardContent>
+        </Card>
+        
+        <div className="flex flex-col gap-6">
+            <Card>
+                <CardHeader>
+                  <CardTitle>Your Solution</CardTitle>
+                  <CardDescription>Write your JavaScript code below.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                    <div className="h-[250px] w-full border rounded-md overflow-hidden">
+                        <CodeEditor
+                        value={code}
+                        onChange={setCode}
+                        language="javascript"
+                        readOnly={isSubmitting}
+                        height="250px"
+                        />
+                    </div>
+                    <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isSubmitting || !code.trim()}>
+                        {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Submit Solution for AI Evaluation
+                    </Button>
+                  </form>
+                </CardContent>
+            </Card>
+
+            {submissionEvaluation && (
+                <Card className="bg-muted/50">
+                    <CardHeader>
+                    <CardTitle className="text-xl flex items-center"><Brain className="mr-2 h-5 w-5 text-primary"/> AI Analysis Report</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3 text-sm">
+                        <div className="flex justify-between">
+                            <span className="font-medium text-foreground">AI Assessment:</span>
+                             <Badge variant={submissionEvaluation.isPotentiallyCorrect ? "default" : "destructive"} className={submissionEvaluation.isPotentiallyCorrect ? "bg-green-500 hover:bg-green-600 text-white" : ""}>
+                                {submissionEvaluation.isPotentiallyCorrect ? "Likely Correct" : "Likely Incorrect"}
+                            </Badge>
+                        </div>
+                        <p><span className="font-medium text-foreground">Explanation:</span> {submissionEvaluation.correctnessExplanation}</p>
+                        <p><span className="font-medium text-foreground">Summary:</span> {submissionEvaluation.overallAssessment}</p>
+                        
+                        <h4 className="font-semibold text-md text-foreground pt-2">Quality Feedback:</h4>
+                        <ScrollArea className="h-24 p-2 border rounded-md bg-background">
+                            <pre className="whitespace-pre-wrap font-sans">{submissionEvaluation.codeQualityFeedback}</pre>
+                        </ScrollArea>
+                    </CardContent>
+                </Card>
+            )}
+        </div>
+      </div>
     </div>
   );
 }
