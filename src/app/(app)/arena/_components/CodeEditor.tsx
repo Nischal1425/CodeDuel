@@ -26,7 +26,7 @@ const languageExtensions: Record<SupportedLanguage, () => Extension> = {
 };
 
 export function CodeEditor({ value, onChange, language, readOnly = false, height = '100%' }: CodeEditorProps) {
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   const [extensions, setExtensions] = useState<Extension[]>([]);
 
   useEffect(() => {
@@ -44,7 +44,7 @@ export function CodeEditor({ value, onChange, language, readOnly = false, height
       extensions={extensions}
       onChange={onChange}
       readOnly={readOnly}
-      theme={theme === 'dark' ? oneDark : 'light'}
+      theme={resolvedTheme === 'dark' ? oneDark : 'light'}
       basicSetup={{
         lineNumbers: true,
         bracketMatching: true,
