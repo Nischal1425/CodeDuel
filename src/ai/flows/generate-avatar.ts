@@ -38,7 +38,7 @@ const generateAvatarFlow = ai.defineFlow(
     const {media} = await ai.generate({
       // IMPORTANT: Use the specific model for image generation.
       model: 'googleai/gemini-2.0-flash-preview-image-generation',
-      prompt: `Generate a square profile avatar based on the following description: ${prompt}. The style should be vibrant and modern, suitable for a gaming or tech profile.`,
+      prompt: `Generate a square profile avatar based on the following description: ${prompt}. The style should be a simple, flat, 2D vector style to ensure a smaller file size.`,
       config: {
         // IMPORTANT: Must include both TEXT and IMAGE.
         responseModalities: ['TEXT', 'IMAGE'],
