@@ -247,19 +247,22 @@ export default function ArenaPage() {
     setGameState('searching');
     setSelectedLobbyName(lobby.name);
 
+    // Simplified query to avoid composite index requirement
     const waitingBattlesQuery = query(
         collection(db, "battles"), 
         where("difficulty", "==", lobby.name), 
         where("status", "==", "waiting"),
-        where("player1.id", "!=", player.id),
-        limit(1)
+        limit(10) // Fetch a few to filter locally
     );
 
     const querySnapshot = await getDocs(waitingBattlesQuery);
+    
+    // Filter out battles created by the current player
+    const availableBattle = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
-    if (!querySnapshot.empty) {
+    if (availableBattle) {
         // Join an existing battle
-        const battleDoc = querySnapshot.docs[0];
+        const battleDoc = availableBattle;
         setBattleId(battleDoc.id);
 
         const player2Data = {
@@ -709,3 +712,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
