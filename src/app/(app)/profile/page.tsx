@@ -1,199 +1,250 @@
+
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useAuth } from '@/contexts/AuthContext';
-import { CodeDuelLogo } from '@/components/CodeDuelLogo';
-import { Swords, LogIn, Info, Loader2 } from 'lucide-react';
-import type { Player } from '@/types';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Loader2, User, Mail, Save, Sparkles, BarChart3, Trophy, Coins, Check, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { generateAvatar } from '@/ai/flows/generate-avatar';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
-export default function LandingPage() {
-  const router = useRouter();
-  const { setPlayerId, isLoading, player } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+export default function ProfilePage() {
+  const { player, isLoading, setPlayer } = useAuth();
   const { toast } = useToast();
 
+  const [username, setUsername] = useState('');
+  const [avatarPrompt, setAvatarPrompt] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
   useEffect(() => {
-    if (!isLoading && player) {
-      router.replace('/dashboard');
+    if (player) {
+      setUsername(player.username);
     }
-  }, [player, isLoading, router]);
+  }, [player]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      toast({ title: "Validation Error", description: "Please enter email and password.", variant: "destructive" });
+    if (!player || !username.trim() || !IS_FIREBASE_CONFIGURED) {
+      if (!IS_FIREBASE_CONFIGURED) {
+        toast({ title: "Offline Mode", description: "Profile updates are disabled in offline mode.", variant: 'destructive' });
+      }
       return;
-    }
+    };
+    if (username.trim() === player.username) return;
 
-    setIsLoggingIn(true);
-    
-    if (!IS_FIREBASE_CONFIGURED) {
-      // Mock login for offline mode
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const mockPlayerId = `mock-${email.replace(/@.*/, '')}`;
-      setPlayerId(mockPlayerId);
-      router.push('/dashboard');
-      setIsLoggingIn(false);
-      return;
-    }
-    
+    setIsSaving(true);
     try {
-        const playersRef = collection(db, "players");
-        const q = query(playersRef, where("email", "==", email));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-            // Player exists
-            const playerDoc = querySnapshot.docs[0];
-            setPlayerId(playerDoc.id);
-            toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
-        } else {
-            // New player, create account
-            const newPlayer: Omit<Player, 'id'> = {
-                username: email.split('@')[0] || 'New Duelist',
-                email: email,
-                coins: 500, // Starting coins
-                rank: 1,
-                rating: 1000, // Starting rating
-                avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
-                unlockedAchievements: [],
-                matchesPlayed: 0,
-                wins: 0,
-                losses: 0,
-                winStreak: 0,
-                isKycVerified: false,
-                matchHistory: [],
-            };
-            const docRef = await addDoc(collection(db, "players"), newPlayer);
-            setPlayerId(docRef.id);
-            toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
-        }
-        router.push('/dashboard');
+      const playerRef = doc(db, "players", player.id);
+      await updateDoc(playerRef, { username: username.trim() });
+      toast({ title: "Success!", description: "Your username has been updated.", className: "bg-green-500 text-white" });
     } catch (error) {
-        console.error("Login Error: ", error);
-        toast({ title: "Login Failed", description: "Could not connect to the server. Please try again.", variant: "destructive" });
+      console.error("Error updating profile:", error);
+      toast({ title: "Error", description: "Could not update your profile. Please try again.", variant: "destructive" });
     } finally {
-        setIsLoggingIn(false);
+      setIsSaving(false);
     }
   };
+  
+  const handleGenerateAvatar = async () => {
+      if (!player || !avatarPrompt.trim() || !IS_FIREBASE_CONFIGURED) {
+        if (!IS_FIREBASE_CONFIGURED) {
+          toast({ title: "Offline Mode", description: "Avatar generation is disabled in offline mode.", variant: 'destructive' });
+        }
+        return;
+      }
 
-  if (isLoading || (!isLoading && player)) {
+      setIsGenerating(true);
+      try {
+          const result = await generateAvatar({ prompt: avatarPrompt });
+          if(result.imageDataUri) {
+              const playerRef = doc(db, "players", player.id);
+              await updateDoc(playerRef, { avatarUrl: result.imageDataUri });
+              setPlayer(prev => prev ? {...prev, avatarUrl: result.imageDataUri} : null);
+              toast({ title: "Avatar Generated!", description: "Your new avatar has been set.", className: "bg-green-500 text-white" });
+          } else {
+              throw new Error("AI did not return an image.");
+          }
+      } catch (error) {
+          console.error("Error generating avatar:", error);
+          toast({ title: "Generation Failed", description: "Could not generate a new avatar. Please try another prompt.", variant: "destructive" });
+      } finally {
+          setIsGenerating(false);
+      }
+  }
+
+
+  if (isLoading) {
+    return <ProfileSkeleton />;
+  }
+
+  if (!player) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
+        <Card>
+            <CardHeader>
+                <CardTitle>Profile Not Found</CardTitle>
+                <CardDescription>Please log in to view your profile.</CardDescription>
+            </CardHeader>
+        </Card>
     );
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-gradient-to-br from-background to-secondary/30">
-      <header className="py-6 px-4 sm:px-6 lg:px-8 shadow-sm sticky top-0 bg-background/80 backdrop-blur-sm z-50">
-        <div className="container mx-auto flex justify-between items-center">
-          <CodeDuelLogo />
-          <Button variant="ghost" onClick={() => document.getElementById('login-section')?.scrollIntoView({ behavior: 'smooth' })}>
-            Login / Sign Up
-          </Button>
+    <div className="container mx-auto max-w-4xl space-y-8">
+      <div className="flex flex-col md:flex-row items-center gap-6">
+        <div className="relative">
+            <Avatar className="h-32 w-32 border-4 border-primary shadow-lg">
+                <AvatarImage src={player.avatarUrl} alt={player.username} data-ai-hint="profile avatar" />
+                <AvatarFallback className="text-4xl">{player.username.substring(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
         </div>
-      </header>
+        <div>
+            <h1 className="text-4xl font-bold text-foreground">{player.username}</h1>
+            <div className="flex items-center gap-2 text-muted-foreground mt-1">
+                <Mail className="h-4 w-4" />
+                <span>{player.email}</span>
+            </div>
+             <div className="flex items-center gap-2 text-muted-foreground mt-1">
+                {player.isKycVerified ? (
+                    <><Check className="h-4 w-4 text-green-500" /><span>KYC Verified</span></>
+                ) : (
+                    <><AlertCircle className="h-4 w-4 text-yellow-500" /><span>KYC Not Verified</span></>
+                )}
+            </div>
+        </div>
+      </div>
 
-      <main className="flex-grow">
-        <section className="py-20 md:py-32 text-center bg-background/50">
-          <div className="container mx-auto px-4">
-            <Swords className="h-20 w-20 text-primary mx-auto mb-6" />
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-foreground mb-6">
-              Welcome to Code Duel
-            </h1>
-            <p className="text-lg sm:text-xl md:text-2xl text-muted-foreground mb-10 max-w-3xl mx-auto">
-              Challenge other coders in thrilling 1v1 real-time battles. Sharpen your skills, earn coins, and climb the leaderboard!
-            </p>
-            <Button size="lg" className="bg-primary hover:bg-primary/90 text-primary-foreground" onClick={() => document.getElementById('login-section')?.scrollIntoView({ behavior: 'smooth' })}>
-              <LogIn className="mr-2 h-5 w-5" /> Get Started
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 text-center">
+        <StatCard icon={BarChart3} title="Rank" value={player.rank} />
+        <StatCard icon={Trophy} title="Rating" value={player.rating} />
+        <StatCard icon={Coins} title="Coins" value={player.coins.toLocaleString()} />
+        <div className="flex items-center justify-around bg-card border rounded-lg p-4">
+            <div>
+                <p className="text-2xl font-bold text-green-500">{player.wins}</p>
+                <p className="text-xs text-muted-foreground">Wins</p>
+            </div>
+            <div>
+                <p className="text-2xl font-bold text-destructive">{player.losses}</p>
+                <p className="text-xs text-muted-foreground">Losses</p>
+            </div>
+             <div>
+                <p className="text-2xl font-bold text-primary">{player.winStreak}</p>
+                <p className="text-xs text-muted-foreground">Streak</p>
+            </div>
+        </div>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-8">
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle>Edit Profile</CardTitle>
+            <CardDescription>Update your public username.</CardDescription>
+          </CardHeader>
+          <form onSubmit={handleUpdateProfile}>
+            <CardContent>
+              <Label htmlFor="username">Username</Label>
+              <Input 
+                id="username" 
+                value={username} 
+                onChange={(e) => setUsername(e.target.value)} 
+                className="mt-1"
+                disabled={!IS_FIREBASE_CONFIGURED || isSaving}
+              />
+            </CardContent>
+            <CardFooter>
+              <Button type="submit" disabled={!IS_FIREBASE_CONFIGURED || isSaving || username === player.username}>
+                {isSaving ? <Loader2 className="mr-2 animate-spin" /> : <Save className="mr-2" />}
+                Save Changes
+              </Button>
+            </CardFooter>
+          </form>
+        </Card>
+
+        <Card className="shadow-lg">
+          <CardHeader>
+            <CardTitle>Generate New Avatar</CardTitle>
+            <CardDescription>Use AI to create a unique avatar from a text description.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Label htmlFor="avatar-prompt">Avatar Prompt</Label>
+            <Input 
+              id="avatar-prompt" 
+              placeholder="e.g., A blue robot with a crown" 
+              value={avatarPrompt}
+              onChange={(e) => setAvatarPrompt(e.target.value)}
+              className="mt-1"
+              disabled={!IS_FIREBASE_CONFIGURED || isGenerating}
+            />
+          </CardContent>
+          <CardFooter>
+            <Button onClick={handleGenerateAvatar} disabled={!IS_FIREBASE_CONFIGURED || !avatarPrompt.trim() || isGenerating} variant="outline">
+              {isGenerating ? <Loader2 className="mr-2 animate-spin" /> : <Sparkles className="mr-2" />}
+              Generate with AI
             </Button>
-          </div>
-        </section>
+          </CardFooter>
+        </Card>
+      </div>
 
-        <section id="about-section" className="py-16 bg-card">
-          <div className="container mx-auto px-4">
-            <div className="text-center mb-12">
-              <Info className="h-12 w-12 text-accent mx-auto mb-4" />
-              <h2 className="text-3xl md:text-4xl font-semibold text-foreground">What is Code Duel?</h2>
-            </div>
-            <div className="max-w-3xl mx-auto text-md md:text-lg text-card-foreground/90 space-y-6 leading-relaxed">
-              <p>
-                Code Duel is an exciting platform where developers can test their coding prowess against others in head-to-head programming challenges. 
-              </p>
-              <p>
-                Whether you're a seasoned competitive programmer or just looking to improve your problem-solving skills, Code Duel offers a fun and engaging way to compete, learn, and win.
-              </p>
-              <ul className="list-disc list-inside space-y-3 pl-4">
-                <li>Solve unique, AI-generated coding problems tailored to your skill level.</li>
-                <li>Compete for virtual coins and climb the global leaderboard.</li>
-                <li>Experience quick, intense matches perfect for a coding adrenaline rush.</li>
-                <li>Improve your coding speed, accuracy, and problem-solving under pressure.</li>
-              </ul>
-            </div>
-          </div>
-        </section>
+       {!IS_FIREBASE_CONFIGURED && (
+         <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Offline Mode</AlertTitle>
+            <AlertDescription>
+                Profile editing and avatar generation are disabled because the application is not connected to Firebase.
+            </AlertDescription>
+         </Alert>
+        )}
+    </div>
+  );
+}
 
-        <section id="login-section" className="py-16 bg-background">
-          <div className="container mx-auto px-4 max-w-md">
-            <Card className="shadow-2xl border-primary/20">
-              <CardHeader>
-                <CardTitle className="text-2xl text-center text-primary">Join the Battle!</CardTitle>
-                <CardDescription className="text-center text-muted-foreground">
-                  {IS_FIREBASE_CONFIGURED ? "Log in or create an account to start dueling." : "Enter any email/password to play in offline mode."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleLogin} className="space-y-6">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required 
-                           className="bg-input/50 focus:border-primary"/>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="password">Password</Label>
-                    <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required 
-                           className="bg-input/50 focus:border-primary"/>
-                  </div>
-                  <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isLoggingIn || !email || !password}>
-                    {isLoggingIn ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {isLoggingIn ? 'Processing...' : 'Login / Sign Up'}
-                  </Button>
-                </form>
-              </CardContent>
-               <CardFooter className="text-xs text-muted-foreground text-center block pt-4">
-                <p>
-                  {IS_FIREBASE_CONFIGURED 
-                    ? "This is a mock login/signup. Your password is not stored securely." 
-                    : "No Firebase credentials found. The app is in offline mode."
-                  }
-                </p>
-              </CardFooter>
-            </Card>
-          </div>
-        </section>
-      </main>
+function StatCard({ icon: Icon, title, value }: { icon: React.ElementType, title: string, value: string | number }) {
+    return (
+        <Card className="p-4 flex flex-col items-center justify-center">
+            <Icon className="h-8 w-8 text-primary mb-2" />
+            <p className="text-2xl font-bold text-foreground">{value}</p>
+            <p className="text-xs text-muted-foreground uppercase">{title}</p>
+        </Card>
+    );
+}
 
-      <footer className="py-8 text-center bg-card border-t">
-        <div className="container mx-auto px-4">
-          <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Code Duel. All rights reserved.
-          </p>
+
+function ProfileSkeleton() {
+  return (
+    <div className="container mx-auto max-w-4xl space-y-8 animate-pulse">
+      <div className="flex flex-col md:flex-row items-center gap-6">
+        <Skeleton className="h-32 w-32 rounded-full" />
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-48 rounded-md" />
+          <Skeleton className="h-5 w-64 rounded-md" />
+          <Skeleton className="h-5 w-32 rounded-md" />
         </div>
-      </footer>
+      </div>
+      <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 w-full rounded-lg" />)}
+      </div>
+      <div className="grid md:grid-cols-2 gap-8">
+        <Card>
+          <CardHeader><Skeleton className="h-7 w-1/2" /></CardHeader>
+          <CardContent><Skeleton className="h-10 w-full" /></CardContent>
+          <CardFooter><Skeleton className="h-10 w-32" /></CardFooter>
+        </Card>
+        <Card>
+          <CardHeader><Skeleton className="h-7 w-1/2" /></CardHeader>
+          <CardContent><Skeleton className="h-10 w-full" /></CardContent>
+          <CardFooter><Skeleton className="h-10 w-36" /></CardFooter>
+        </Card>
+      </div>
     </div>
   );
 }
