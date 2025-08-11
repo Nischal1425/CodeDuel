@@ -251,6 +251,7 @@ export default function ArenaPage() {
         collection(db, "battles"), 
         where("difficulty", "==", lobby.name), 
         where("status", "==", "waiting"),
+        where("player1.id", "!=", player.id),
         limit(1)
     );
 
