@@ -11,7 +11,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Loader2, User, Mail, Save, Sparkles, BarChart3, Trophy, Coins, Check, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '@/lib/firebase';
 import { generateAvatar } from '@/ai/flows/generate-avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -66,21 +67,27 @@ export default function ProfilePage() {
 
       setIsGenerating(true);
       try {
-          // Pass the userId to the flow
-          const result = await generateAvatar({ prompt: avatarPrompt, userId: player.id });
+          // 1. Call the Genkit flow to get the image data URI
+          const result = await generateAvatar({ prompt: avatarPrompt });
           
-          if(result.imageUrl) {
+          if(result.imageDataUri) {
+              // 2. Upload the image data from the client to Firebase Storage
+              const storageRef = ref(storage, `avatars/${player.id}-${Date.now()}.png`);
+              const uploadResult = await uploadString(storageRef, result.imageDataUri, 'data_url');
+              const downloadUrl = await getDownloadURL(uploadResult.ref);
+
+              // 3. Save the public download URL to the player's profile in Firestore
               const playerRef = doc(db, "players", player.id);
-              // Save the new public URL to the player's profile
-              await updateDoc(playerRef, { avatarUrl: result.imageUrl });
-              setPlayer(prev => prev ? {...prev, avatarUrl: result.imageUrl} : null);
+              await updateDoc(playerRef, { avatarUrl: downloadUrl });
+              
+              setPlayer(prev => prev ? {...prev, avatarUrl: downloadUrl} : null);
               toast({ title: "Avatar Generated!", description: "Your new avatar has been set.", className: "bg-green-500 text-white" });
           } else {
-              throw new Error("AI did not return an image URL.");
+              throw new Error("AI did not return image data.");
           }
       } catch (error) {
-          console.error("Error generating avatar:", error);
-          toast({ title: "Generation Failed", description: "Could not generate a new avatar. Please try another prompt.", variant: "destructive" });
+          console.error("Error generating or uploading avatar:", error);
+          toast({ title: "Generation Failed", description: "Could not generate or upload the new avatar. Please try another prompt.", variant: "destructive" });
       } finally {
           setIsGenerating(false);
       }
