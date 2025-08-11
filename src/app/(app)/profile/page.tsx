@@ -66,14 +66,17 @@ export default function ProfilePage() {
 
       setIsGenerating(true);
       try {
-          const result = await generateAvatar({ prompt: avatarPrompt });
-          if(result.imageDataUri) {
+          // Pass the userId to the flow
+          const result = await generateAvatar({ prompt: avatarPrompt, userId: player.id });
+          
+          if(result.imageUrl) {
               const playerRef = doc(db, "players", player.id);
-              await updateDoc(playerRef, { avatarUrl: result.imageDataUri });
-              setPlayer(prev => prev ? {...prev, avatarUrl: result.imageDataUri} : null);
+              // Save the new public URL to the player's profile
+              await updateDoc(playerRef, { avatarUrl: result.imageUrl });
+              setPlayer(prev => prev ? {...prev, avatarUrl: result.imageUrl} : null);
               toast({ title: "Avatar Generated!", description: "Your new avatar has been set.", className: "bg-green-500 text-white" });
           } else {
-              throw new Error("AI did not return an image.");
+              throw new Error("AI did not return an image URL.");
           }
       } catch (error) {
           console.error("Error generating avatar:", error);
