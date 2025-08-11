@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award, History, Landmark } from 'lucide-react';
+import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award, History, Landmark, ShieldCheck } from 'lucide-react';
 import {
   SidebarMenu,
   SidebarMenuItem,
