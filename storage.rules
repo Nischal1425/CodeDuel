@@ -1,0 +1,17 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Match any file path that starts with "avatars/"
+    match /avatars/{fileName} {
+        // Allow public read access to all avatars
+        allow read;
+
+        // Allow a user to write (upload/update/delete) an avatar if:
+        // 1. The user is authenticated (request.auth is not null)
+        // 2. The filename starts with the user's own ID. This prevents
+        //    one user from overwriting another user's avatar.
+        allow write: if request.auth != null && fileName.startsWith(request.auth.uid);
+    }
+  }
+}
