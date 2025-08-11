@@ -20,6 +20,7 @@ export interface Player {
   winStreak: number;
   isKycVerified: boolean;
   matchHistory: MatchHistoryEntry[];
+  lastCooldownCompletedAt?: any; // Firestore Timestamp
 }
 
 export interface Battle {
