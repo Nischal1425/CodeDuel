@@ -101,12 +101,12 @@ export default function ArenaPage() {
         if (battle.winnerId === player.id) {
             outcome = 'win';
             const winnings = (entryFee * 2) - Math.floor(entryFee * 2 * COMMISSION_RATE);
-            coin_change = winnings;
+            coin_change = winnings - entryFee; // Net gain
             toastTitle="Victory by Forfeit!";
             toastDesc=`Your opponent forfeited. You won ${winnings} coins.`;
         } else {
             outcome = 'loss';
-            // Entry fee already deducted, so no change
+            coin_change = -entryFee;
             toastTitle="You Forfeited";
             toastDesc=`You forfeited the match and lost ${entryFee} coins.`;
             toastVariant="destructive";
@@ -115,17 +115,17 @@ export default function ArenaPage() {
         if (battle.winnerId === player.id) {
             outcome = 'win';
             const winnings = (entryFee * 2) - Math.floor(entryFee * 2 * COMMISSION_RATE);
-            coin_change = winnings;
+            coin_change = winnings - entryFee; // Net gain
             toastTitle="Victory!";
             toastDesc=`You won the duel! You won ${winnings} coins.`;
         } else if (!battle.winnerId) {
             outcome = 'draw';
-            coin_change = entryFee; // Refund
+            coin_change = 0; // Fee already deducted, now refunded effectively
             toastTitle="Draw!";
             toastDesc=`The duel ended in a draw. Your entry fee of ${entryFee} coins was refunded.`;
         } else {
             outcome = 'loss';
-            // Entry fee already deducted
+            coin_change = -entryFee;
             toastTitle="Defeat";
             toastDesc="Your opponent's solution was deemed superior.";
             toastVariant="destructive";
@@ -133,7 +133,6 @@ export default function ArenaPage() {
     }
 
     const opponentInfo = player.id === battle.player1.id ? battle.player2 : battle.player1;
-    // For bot matches or if opponent data is missing
     const opponentRank = opponentInfo?.id === 'bot-player' ? player.rank : (opponentInfo ? 10 : player.rank);
 
     const achievementResult = checkAchievementsOnMatchEnd(player, { won: outcome === 'win', opponentRank, lobbyDifficulty: battle.difficulty });
@@ -151,15 +150,29 @@ export default function ArenaPage() {
 
     try {
         if (IS_FIREBASE_CONFIGURED) {
-            const playerRef = doc(db, "players", player.id);
-            await updateDoc(playerRef, {
-                coins: finalPlayerStats.coins + coin_change, // Apply coin change
-                matchesPlayed: finalPlayerStats.matchesPlayed,
-                wins: finalPlayerStats.wins,
-                losses: finalPlayerStats.losses,
-                winStreak: finalPlayerStats.winStreak,
-                unlockedAchievements: finalPlayerStats.unlockedAchievements,
-                matchHistory: arrayUnion(newMatchHistoryEntry)
+             await runTransaction(db, async (transaction) => {
+                const playerRef = doc(db, "players", player.id);
+                const playerDoc = await transaction.get(playerRef);
+                if (!playerDoc.exists()) throw "Player document does not exist!";
+
+                const currentCoins = playerDoc.data().coins || 0;
+                
+                let newCoins;
+                if(outcome === 'draw'){
+                    newCoins = currentCoins + battle.wager; // Refund
+                } else {
+                    newCoins = currentCoins + (outcome === 'win' ? (battle.wager * 2 * (1-COMMISSION_RATE)) : 0);
+                }
+
+                transaction.update(playerRef, {
+                    coins: Math.floor(newCoins),
+                    matchesPlayed: finalPlayerStats.matchesPlayed,
+                    wins: finalPlayerStats.wins,
+                    losses: finalPlayerStats.losses,
+                    winStreak: finalPlayerStats.winStreak,
+                    unlockedAchievements: finalPlayerStats.unlockedAchievements,
+                    matchHistory: arrayUnion(newMatchHistoryEntry)
+                });
             });
         }
     } catch (error) {
