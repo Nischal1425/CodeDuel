@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award, History } from 'lucide-react';
+import { Home, Swords, Trophy, UserCircle, LogOut, DollarSign, ShieldQuestion, Award, History, Landmark } from 'lucide-react';
 import {
   SidebarMenu,
   SidebarMenuItem,
@@ -23,6 +23,8 @@ const navItems = [
 const secondaryNavItems = [
   { href: '/buy-coins', label: 'Buy Coins', icon: DollarSign },
   { href: '/cooldown-challenge', label: 'Cooldown Challenge', icon: ShieldQuestion },
+  { href: '/redeem', label: 'Redeem', icon: Landmark },
+  { href: '/kyc', label: 'KYC', icon: ShieldCheck },
 ];
 
 export function AppNavigation() {

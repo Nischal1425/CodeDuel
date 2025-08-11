@@ -8,25 +8,22 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, User, Mail, Save, Sparkles, BarChart3, Trophy, Coins, Check, AlertCircle } from 'lucide-react';
+import { Loader2, User, Mail, Save, BarChart3, Trophy, Coins, Check, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '@/lib/firebase';
-import { generateAvatar } from '@/ai/flows/generate-avatar';
+import { db } from '@/lib/firebase';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import Link from 'next/link';
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 export default function ProfilePage() {
-  const { player, isLoading, setPlayer } = useAuth();
+  const { player, isLoading } = useAuth();
   const { toast } = useToast();
 
   const [username, setUsername] = useState('');
-  const [avatarPrompt, setAvatarPrompt] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     if (player) {
@@ -56,43 +53,6 @@ export default function ProfilePage() {
       setIsSaving(false);
     }
   };
-  
-  const handleGenerateAvatar = async () => {
-      if (!player || !avatarPrompt.trim() || !IS_FIREBASE_CONFIGURED) {
-        if (!IS_FIREBASE_CONFIGURED) {
-          toast({ title: "Offline Mode", description: "Avatar generation is disabled in offline mode.", variant: 'destructive' });
-        }
-        return;
-      }
-
-      setIsGenerating(true);
-      try {
-          // 1. Call the Genkit flow to get the image data URI
-          const result = await generateAvatar({ prompt: avatarPrompt });
-          
-          if(result.imageDataUri) {
-              // 2. Upload the image data from the client to Firebase Storage
-              const storageRef = ref(storage, `avatars/${player.id}-${Date.now()}.png`);
-              const uploadResult = await uploadString(storageRef, result.imageDataUri, 'data_url');
-              const downloadUrl = await getDownloadURL(uploadResult.ref);
-
-              // 3. Save the public download URL to the player's profile in Firestore
-              const playerRef = doc(db, "players", player.id);
-              await updateDoc(playerRef, { avatarUrl: downloadUrl });
-              
-              setPlayer(prev => prev ? {...prev, avatarUrl: downloadUrl} : null);
-              toast({ title: "Avatar Generated!", description: "Your new avatar has been set.", className: "bg-green-500 text-white" });
-          } else {
-              throw new Error("AI did not return image data.");
-          }
-      } catch (error) {
-          console.error("Error generating or uploading avatar:", error);
-          toast({ title: "Generation Failed", description: "Could not generate or upload the new avatar. Please try another prompt.", variant: "destructive" });
-      } finally {
-          setIsGenerating(false);
-      }
-  }
-
 
   if (isLoading) {
     return <ProfileSkeleton />;
@@ -182,25 +142,37 @@ export default function ProfilePage() {
 
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle>Generate New Avatar</CardTitle>
-            <CardDescription>Use AI to create a unique avatar from a text description.</CardDescription>
+            <CardTitle>Account Verification (KYC)</CardTitle>
+            <CardDescription>Verify your account to enable coin redemption and other features.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Label htmlFor="avatar-prompt">Avatar Prompt</Label>
-            <Input 
-              id="avatar-prompt" 
-              placeholder="e.g., A blue robot with a crown" 
-              value={avatarPrompt}
-              onChange={(e) => setAvatarPrompt(e.target.value)}
-              className="mt-1"
-              disabled={!IS_FIREBASE_CONFIGURED || isGenerating}
-            />
+            {player.isKycVerified ? (
+                 <Alert variant="default" className="border-green-500">
+                    <ShieldCheck className="h-4 w-4" />
+                    <AlertTitle className="text-green-700">Account Verified</AlertTitle>
+                    <AlertDescription>
+                       You have successfully completed KYC verification.
+                    </AlertDescription>
+                </Alert>
+            ) : (
+                 <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Verification Required</AlertTitle>
+                    <AlertDescription>
+                        Your account is not yet verified.
+                    </AlertDescription>
+                </Alert>
+            )}
           </CardContent>
           <CardFooter>
-            <Button onClick={handleGenerateAvatar} disabled={!IS_FIREBASE_CONFIGURED || !avatarPrompt.trim() || isGenerating} variant="outline">
-              {isGenerating ? <Loader2 className="mr-2 animate-spin" /> : <Sparkles className="mr-2" />}
-              Generate with AI
-            </Button>
+            {!player.isKycVerified && (
+                 <Button asChild variant="outline">
+                    <Link href="/kyc">
+                        <ShieldCheck className="mr-2" />
+                        Start KYC Process
+                    </Link>
+                </Button>
+            )}
           </CardFooter>
         </Card>
       </div>
@@ -210,7 +182,7 @@ export default function ProfilePage() {
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Offline Mode</AlertTitle>
             <AlertDescription>
-                Profile editing and avatar generation are disabled because the application is not connected to Firebase.
+                Profile editing is disabled because the application is not connected to Firebase.
             </AlertDescription>
          </Alert>
         )}
