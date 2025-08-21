@@ -249,23 +249,20 @@ export default function ArenaPage() {
     setGameState('searching');
     setSelectedLobbyName(lobby.name);
 
-    // Efficient query for any open battle in the lobby
+    // Efficient query for any open battle in the lobby that is not ours
     const waitingBattlesQuery = query(
       collection(db, "battles"),
       where("difficulty", "==", lobby.name),
       where("status", "==", "waiting"),
-      limit(10) // Fetch a few candidates
+      where("player1.id", "!=", player.id),
+      limit(1)
     );
 
     const querySnapshot = await getDocs(waitingBattlesQuery);
     
-    // Filter out games created by the current player on the client
-    const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
-
-
-    if (availableBattleDoc) {
+    if (!querySnapshot.empty) {
         // Join an existing battle using a transaction to prevent race conditions
-        const battleDocRef = availableBattleDoc.ref;
+        const battleDocRef = querySnapshot.docs[0].ref;
         try {
             await runTransaction(db, async (transaction) => {
                 const battleDoc = await transaction.get(battleDocRef);
@@ -726,6 +723,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
