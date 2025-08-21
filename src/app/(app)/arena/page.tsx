@@ -18,7 +18,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, arrayUnion, runTransaction, documentId } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, arrayUnion, runTransaction, documentId, getDoc } from "firebase/firestore";
 
 
 // Component Imports
@@ -251,27 +251,28 @@ export default function ArenaPage() {
     
     try {
         const battleDocRefId = await runTransaction(db, async (transaction) => {
+            // Simplified query to find any waiting battle in the lobby.
             const waitingBattlesQuery = query(
                 collection(db, "battles"),
                 where("difficulty", "==", lobby.name),
-                where("status", "==", "waiting"),
-                where("player1.id", "!=", player.id),
-                limit(1)
+                where("status", "==", "waiting")
             );
             
             const querySnapshot = await getDocs(waitingBattlesQuery);
             
-            if (!querySnapshot.empty) {
+            // Find a battle that is not ours from the results.
+            const availableBattle = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
+
+            if (availableBattle) {
                 // Found a battle to join
-                const battleDoc = querySnapshot.docs[0];
-                const battleDocRef = doc(db, 'battles', battleDoc.id);
+                const battleDocRef = doc(db, 'battles', availableBattle.id);
 
                 const player2Data = {
                     id: player.id,
                     username: player.username,
                     avatarUrl: player.avatarUrl,
                     language: DEFAULT_LANGUAGE,
-                    code: getCodePlaceholder(DEFAULT_LANGUAGE, battleDoc.data().question),
+                    code: getCodePlaceholder(DEFAULT_LANGUAGE, availableBattle.data().question),
                     hasSubmitted: false
                 };
 
@@ -282,7 +283,7 @@ export default function ArenaPage() {
                 });
                 
                 toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
-                return battleDoc.id;
+                return availableBattle.id;
 
             } else {
                 // No available battles, so create a new one
@@ -320,7 +321,10 @@ export default function ArenaPage() {
         toast({ title: "Error Creating Match", description: "Could not find or create a match. Please try again.", variant: "destructive" });
         resetGameState(true);
         const playerRef = doc(db, "players", player.id);
-        await updateDoc(playerRef, { coins: player.coins + lobby.entryFee }); // Refund fee
+        const playerSnap = await getDoc(playerRef);
+        if (playerSnap.exists()) {
+             await updateDoc(playerRef, { coins: playerSnap.data().coins + lobby.entryFee }); // Refund fee
+        }
     }
   }, [player, toast]);
 
@@ -426,9 +430,10 @@ export default function ArenaPage() {
       }
       
       const battle = { id: docSnap.id, ...docSnap.data() } as Battle;
+      const oldBattle = battleDataRef.current;
       setBattleData(battle);
       
-      if (battle.status === 'in-progress' && currentGameState !== 'inGame') {
+      if (battle.status === 'in-progress' && oldBattle?.status !== 'in-progress') {
         setGameState('inGame');
         setTimeRemaining(LOBBIES.find(l => l.name === battle.difficulty)!.baseTime * 60);
       }
@@ -532,8 +537,8 @@ export default function ArenaPage() {
             try {
                 if (battleId) {
                     const battleDocRef = doc(db, 'battles', battleId);
-                    const battleDoc = await getDocs(query(collection(db, "battles"), where(documentId(), "==", battleId)));
-                    const currentBattle = battleDoc.docs[0]?.data();
+                    const battleDocSnap = await getDoc(battleDocRef);
+                    const currentBattle = battleDocSnap.data();
 
                     if (currentBattle && currentBattle.player1.id === player.id && !currentBattle.player2) {
                         await deleteDoc(battleDocRef);
@@ -542,8 +547,11 @@ export default function ArenaPage() {
                 const lobby = LOBBIES.find(l => l.name === selectedLobbyNameRef.current);
                 if (lobby) {
                     const playerRef = doc(db, "players", player.id);
-                    await updateDoc(playerRef, { coins: player.coins + lobby.entryFee });
-                    toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
+                    const playerSnap = await getDoc(playerRef);
+                    if (playerSnap.exists()) {
+                        await updateDoc(playerRef, { coins: playerSnap.data().coins + lobby.entryFee });
+                        toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
+                    }
                 }
             } catch (error) {
                 console.error("Error cancelling search:", error);
@@ -726,3 +734,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
