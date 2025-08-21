@@ -1,5 +1,7 @@
+
 "use client";
 
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,6 +10,11 @@ import { History, Coins, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
+import type { MatchHistoryEntry } from '@/types';
+import { db } from '@/lib/firebase';
+import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 const getOutcomeStyles = (outcome: 'win' | 'loss' | 'draw') => {
     switch (outcome) {
@@ -18,9 +25,34 @@ const getOutcomeStyles = (outcome: 'win' | 'loss' | 'draw') => {
 }
 
 export default function HistoryPage() {
-  const { player, isLoading } = useAuth();
+  const { player, isLoading: isAuthLoading } = useAuth();
+  const [matchHistory, setMatchHistory] = useState<MatchHistoryEntry[]>([]);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!player || !IS_FIREBASE_CONFIGURED) {
+      setIsHistoryLoading(false);
+      return;
+    }
+
+    const fetchHistory = async () => {
+      try {
+        const historyCollection = collection(db, 'matchHistory');
+        const q = query(historyCollection, where("playerId", "==", player.id), orderBy("date", "desc"));
+        const querySnapshot = await getDocs(q);
+        const history = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchHistoryEntry));
+        setMatchHistory(history);
+      } catch (error) {
+        console.error("Error fetching match history:", error);
+      } finally {
+        setIsHistoryLoading(false);
+      }
+    };
+
+    fetchHistory();
+  }, [player]);
+
+  if (isAuthLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -32,8 +64,6 @@ export default function HistoryPage() {
     return <div className="text-center py-10">Please log in to view your match history.</div>;
   }
   
-  const matchHistory = player.matchHistory || [];
-  
   return (
     <div className="container mx-auto max-w-4xl">
       <Card className="shadow-lg border-primary/20">
@@ -43,7 +73,11 @@ export default function HistoryPage() {
             <CardDescription className="text-lg text-muted-foreground">Review your past duels and performance.</CardDescription>
         </CardHeader>
         <CardContent>
-          {matchHistory.length === 0 ? (
+          {isHistoryLoading ? (
+            <div className="flex justify-center items-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          ) : matchHistory.length === 0 ? (
             <div className="text-center py-10 text-muted-foreground">
                 <History className="mx-auto h-12 w-12 mb-4" />
                 <p className="text-lg font-medium">No Matches Played Yet</p>
@@ -62,7 +96,7 @@ export default function HistoryPage() {
                 </TableHeader>
                 <TableBody>
                 {matchHistory.map((match) => (
-                    <TableRow key={match.matchId}>
+                    <TableRow key={match.id || match.matchId}>
                     <TableCell>
                         <div className="flex items-center gap-3">
                         <Avatar className="h-9 w-9 border">

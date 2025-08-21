@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -74,7 +75,6 @@ export default function LandingPage() {
                 losses: 0,
                 winStreak: 0,
                 isKycVerified: false,
-                matchHistory: [],
             };
             const docRef = await addDoc(collection(db, "players"), newPlayer);
             setPlayerId(docRef.id);

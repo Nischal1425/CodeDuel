@@ -18,7 +18,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, arrayUnion, runTransaction, documentId, getDoc } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, documentId, getDoc } from "firebase/firestore";
 
 
 // Component Imports
@@ -139,7 +139,7 @@ export default function ArenaPage() {
     
     const finalPlayerStats = achievementResult.updatedPlayer;
 
-    const newMatchHistoryEntry: MatchHistoryEntry = {
+    const newMatchHistoryEntry: Omit<MatchHistoryEntry, 'id' | 'playerId'> = {
       matchId: battle.id,
       opponent: { username: opponentInfo?.username || 'Unknown', avatarUrl: opponentInfo?.avatarUrl },
       outcome: outcome,
@@ -173,9 +173,14 @@ export default function ArenaPage() {
                     losses: finalPlayerStats.losses,
                     winStreak: finalPlayerStats.winStreak,
                     unlockedAchievements: finalPlayerStats.unlockedAchievements,
-                    matchHistory: arrayUnion(newMatchHistoryEntry)
                 });
-            });
+             });
+             
+             // Save match history to its own collection
+             await addDoc(collection(db, 'matchHistory'), {
+                ...newMatchHistoryEntry,
+                playerId: player.id
+             });
         }
     } catch (error) {
         console.error("Failed to update player stats in Firestore:", error);
@@ -255,24 +260,25 @@ export default function ArenaPage() {
             const waitingBattlesQuery = query(
                 collection(db, "battles"),
                 where("difficulty", "==", lobby.name),
-                where("status", "==", "waiting")
+                where("status", "==", "waiting"),
+                limit(1) // Just need one to join
             );
             
             const querySnapshot = await getDocs(waitingBattlesQuery);
             
             // Find a battle that is not ours from the results.
-            const availableBattle = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
+            const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
-            if (availableBattle) {
+            if (availableBattleDoc) {
                 // Found a battle to join
-                const battleDocRef = doc(db, 'battles', availableBattle.id);
+                const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
 
                 const player2Data = {
                     id: player.id,
                     username: player.username,
                     avatarUrl: player.avatarUrl,
                     language: DEFAULT_LANGUAGE,
-                    code: getCodePlaceholder(DEFAULT_LANGUAGE, availableBattle.data().question),
+                    code: getCodePlaceholder(DEFAULT_LANGUAGE, availableBattleDoc.data().question),
                     hasSubmitted: false
                 };
 
@@ -283,7 +289,7 @@ export default function ArenaPage() {
                 });
                 
                 toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
-                return availableBattle.id;
+                return availableBattleDoc.id;
 
             } else {
                 // No available battles, so create a new one

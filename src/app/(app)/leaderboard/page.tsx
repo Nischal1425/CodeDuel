@@ -15,11 +15,11 @@ import { useToast } from "@/hooks/use-toast";
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 const mockLeaderboardData: Player[] = [
-  { id: 'player001', username: 'CodeNinja', rating: 2850, coins: 150000, matchesPlayed: 320, wins: 273, rank: 1, email: '', unlockedAchievements: [], losses: 47, winStreak: 10, isKycVerified: true, matchHistory: [] },
-  { id: 'player002', username: 'AlgoQueen', rating: 2780, coins: 125000, matchesPlayed: 290, wins: 238, rank: 2, email: '', unlockedAchievements: [], losses: 52, winStreak: 5, isKycVerified: true, matchHistory: [] },
-  { id: 'player003', username: 'ByteMaster', rating: 2700, coins: 100000, matchesPlayed: 350, wins: 273, rank: 3, email: '', unlockedAchievements: [], losses: 77, winStreak: 2, isKycVerified: true, matchHistory: [] },
-  { id: 'player004', username: 'SyntaxSorcerer', rating: 2650, coins: 95000, matchesPlayed: 250, wins: 188, rank: 4, email: '', unlockedAchievements: [], losses: 62, winStreak: 1, isKycVerified: true, matchHistory: [] },
-  { id: 'player005', username: 'LogicLord', rating: 2600, coins: 80000, matchesPlayed: 310, wins: 217, rank: 5, email: '', unlockedAchievements: [], losses: 93, winStreak: 0, isKycVerified: true, matchHistory: [] },
+  { id: 'player001', username: 'CodeNinja', rating: 2850, coins: 150000, matchesPlayed: 320, wins: 273, rank: 1, email: '', unlockedAchievements: [], losses: 47, winStreak: 10, isKycVerified: true },
+  { id: 'player002', username: 'AlgoQueen', rating: 2780, coins: 125000, matchesPlayed: 290, wins: 238, rank: 2, email: '', unlockedAchievements: [], losses: 52, winStreak: 5, isKycVerified: true },
+  { id: 'player003', username: 'ByteMaster', rating: 2700, coins: 100000, matchesPlayed: 350, wins: 273, rank: 3, email: '', unlockedAchievements: [], losses: 77, winStreak: 2, isKycVerified: true },
+  { id: 'player004', username: 'SyntaxSorcerer', rating: 2650, coins: 95000, matchesPlayed: 250, wins: 188, rank: 4, email: '', unlockedAchievements: [], losses: 62, winStreak: 1, isKycVerified: true },
+  { id: 'player005', username: 'LogicLord', rating: 2600, coins: 80000, matchesPlayed: 310, wins: 217, rank: 5, email: '', unlockedAchievements: [], losses: 93, winStreak: 0, isKycVerified: true },
 ];
 
 export default function LeaderboardPage() {

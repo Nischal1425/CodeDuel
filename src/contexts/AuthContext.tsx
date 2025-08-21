@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Player } from '@/types';
@@ -77,7 +78,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         losses: 10,
         winStreak: 3,
         isKycVerified: false,
-        matchHistory: [],
       };
       setPlayer(mockPlayer);
       setIsLoading(false);

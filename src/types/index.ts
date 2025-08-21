@@ -19,7 +19,6 @@ export interface Player {
   losses: number;
   winStreak: number;
   isKycVerified: boolean;
-  matchHistory: MatchHistoryEntry[];
   lastCooldownCompletedAt?: any; // Firestore Timestamp
 }
 
@@ -95,6 +94,8 @@ export interface Achievement {
 }
 
 export interface MatchHistoryEntry {
+  id?: string; // Firestore document ID
+  playerId: string;
   matchId: string;
   opponent: {
     username: string;
