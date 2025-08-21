@@ -18,7 +18,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, documentId, getDoc } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, documentId, getDoc, writeBatch } from "firebase/firestore";
 
 
 // Component Imports
@@ -142,37 +142,37 @@ export default function ArenaPage() {
 
     try {
         if (IS_FIREBASE_CONFIGURED) {
-             await runTransaction(db, async (transaction) => {
-                const playerRef = doc(db, "players", player.id);
-                const playerDoc = await transaction.get(playerRef);
-                if (!playerDoc.exists()) throw "Player document does not exist!";
+             const batch = writeBatch(db);
+             const playerRef = doc(db, "players", player.id);
+             
+             const playerSnap = await getDoc(playerRef);
+             if (!playerSnap.exists()) throw "Player not found";
 
-                const currentCoins = playerDoc.data().coins || 0;
-                let newCoins = currentCoins;
-                
-                // On match start, the fee is deducted. Here we add back any winnings or refunds.
-                if (outcome === 'win') {
-                    newCoins += (battle.wager * 2 * (1 - COMMISSION_RATE));
-                } else if (outcome === 'draw') {
-                    newCoins += battle.wager; // Refund entry fee
-                }
-                // In case of a loss, no coins are returned, so balance remains as it was after deduction.
+             const currentCoins = playerSnap.data().coins || 0;
+             let newCoins = currentCoins;
+            
+              if (outcome === 'win') {
+                  newCoins += (battle.wager * 2 * (1 - COMMISSION_RATE));
+              } else if (outcome === 'draw') {
+                  newCoins += battle.wager; // Refund entry fee
+              }
 
-                transaction.update(playerRef, {
-                    coins: Math.floor(newCoins),
-                    matchesPlayed: finalPlayerStats.matchesPlayed,
-                    wins: finalPlayerStats.wins,
-                    losses: finalPlayerStats.losses,
-                    winStreak: finalPlayerStats.winStreak,
-                    unlockedAchievements: finalPlayerStats.unlockedAchievements,
-                });
+             batch.update(playerRef, {
+                 coins: Math.floor(newCoins),
+                 matchesPlayed: finalPlayerStats.matchesPlayed,
+                 wins: finalPlayerStats.wins,
+                 losses: finalPlayerStats.losses,
+                 winStreak: finalPlayerStats.winStreak,
+                 unlockedAchievements: finalPlayerStats.unlockedAchievements,
              });
              
-             // Save match history to its own collection
-             await addDoc(collection(db, 'matchHistory'), {
+             const historyRef = doc(collection(db, 'matchHistory'));
+             batch.set(historyRef, {
                 ...newMatchHistoryEntry,
                 playerId: player.id
              });
+             
+             await batch.commit();
         }
     } catch (error) {
         console.error("Failed to update player stats in Firestore:", error);
@@ -247,81 +247,88 @@ export default function ArenaPage() {
     selectedLobbyNameRef.current = lobby.name;
 
     try {
-      const battleDocRefId = await runTransaction(db, async (transaction) => {
         const battlesRef = collection(db, "battles");
         const waitingBattlesQuery = query(
           battlesRef,
           where("difficulty", "==", lobby.name),
           where("status", "==", "waiting"),
-          limit(10) // Fetch a few potential matches
+          limit(10)
         );
-
-        const querySnapshot = await transaction.get(waitingBattlesQuery);
         
-        // Find the first battle that isn't ours
-        const availableBattleDoc = querySnapshot.docs.find(
-          (doc) => doc.data().player1.id !== player.id
-        );
-
+        const querySnapshot = await getDocs(waitingBattlesQuery);
+        
+        const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
+        
+        let battleDocRefId: string | null = null;
+        
         if (availableBattleDoc) {
-          // Found a battle to join
-          const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
-          const player2Data = {
-            id: player.id,
-            username: player.username,
-            avatarUrl: player.avatarUrl,
-            language: DEFAULT_LANGUAGE,
-            code: getCodePlaceholder(DEFAULT_LANGUAGE, availableBattleDoc.data().question),
-            hasSubmitted: false,
-          };
-
-          transaction.update(battleDocRef, {
-            player2: player2Data,
-            status: 'in-progress',
-            startedAt: serverTimestamp(),
-          });
-          
-          toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
-          return availableBattleDoc.id;
-        } else {
-          // No available battles, so create a new one
-          const question = await generateCodingChallenge({
-            playerRank: player.rank,
-            targetDifficulty: lobby.name,
-          });
-          if (!question.solution) throw new Error("AI failed to provide a valid solution.");
-
-          const player1Data = {
-            id: player.id,
-            username: player.username,
-            avatarUrl: player.avatarUrl,
-            language: DEFAULT_LANGUAGE,
-            code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
-            hasSubmitted: false,
-          };
-          
-          const newBattleRef = doc(collection(db, "battles"));
-          transaction.set(newBattleRef, {
-            player1: player1Data,
-            status: 'waiting',
-            difficulty: lobby.name,
-            wager: lobby.entryFee,
-            question,
-            createdAt: serverTimestamp(),
-          });
-          
-          toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
-          return newBattleRef.id;
+            // Attempt to join the found battle
+            const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const freshBattleDoc = await transaction.get(battleDocRef);
+                    if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
+                        throw new Error("Battle is no longer available.");
+                    }
+                    
+                    const player2Data = {
+                        id: player.id,
+                        username: player.username,
+                        avatarUrl: player.avatarUrl,
+                        language: DEFAULT_LANGUAGE,
+                        code: getCodePlaceholder(DEFAULT_LANGUAGE, freshBattleDoc.data().question),
+                        hasSubmitted: false,
+                    };
+                    
+                    transaction.update(battleDocRef, {
+                        player2: player2Data,
+                        status: 'in-progress',
+                        startedAt: serverTimestamp(),
+                    });
+                });
+                battleDocRefId = availableBattleDoc.id;
+                toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
+            } catch (e) {
+                // Transaction failed, likely because another player joined first.
+                // We'll proceed to create a new game.
+                console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
+            }
         }
-      });
+        
+        if (!battleDocRefId) {
+            // No available battle or failed to join, create a new one.
+            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+            if (!question.solution) throw new Error("AI failed to provide a valid solution.");
+            
+            const player1Data = {
+                id: player.id,
+                username: player.username,
+                avatarUrl: player.avatarUrl,
+                language: DEFAULT_LANGUAGE,
+                code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
+                hasSubmitted: false,
+            };
 
-      if (battleDocRefId) {
-        setBattleId(battleDocRefId);
-      } else {
-        throw new Error("Transaction did not return a battle ID.");
-      }
+            const newBattleRef = await addDoc(collection(db, "battles"), {
+                player1: player1Data,
+                status: 'waiting',
+                difficulty: lobby.name,
+                wager: lobby.entryFee,
+                question,
+                createdAt: serverTimestamp(),
+            });
+            battleDocRefId = newBattleRef.id;
+            toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
+        }
+
+        if (battleDocRefId) {
+            setBattleId(battleDocRefId);
+        } else {
+            throw new Error("Matchmaking failed to produce a valid battle ID.");
+        }
+
     } catch (error) {
-      console.error("Matchmaking transaction failed:", error);
+      console.error("Matchmaking error:", error);
       toast({ title: "Error Creating Match", description: "Could not find or create a match. Please try again.", variant: "destructive" });
       resetGameState(true);
       // Refund the fee if matchmaking fails
@@ -329,7 +336,7 @@ export default function ArenaPage() {
       try {
         const playerSnap = await getDoc(playerRef);
         if (playerSnap.exists()) {
-          await updateDoc(playerRef, { coins: playerSnap.data().coins + lobby.entryFee });
+          await updateDoc(playerRef, { coins: (playerSnap.data().coins || 0) + lobby.entryFee });
         }
       } catch (refundError) {
         console.error("Failed to refund entry fee:", refundError);
@@ -751,7 +758,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
