@@ -257,7 +257,7 @@ export default function ArenaPage() {
         );
 
         const querySnapshot = await transaction.get(waitingBattlesQuery);
-
+        
         // Find the first battle that isn't ours
         const availableBattleDoc = querySnapshot.docs.find(
           (doc) => doc.data().player1.id !== player.id
@@ -299,9 +299,9 @@ export default function ArenaPage() {
             code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
             hasSubmitted: false,
           };
-
-          const newBattleDocRef = doc(battlesRef);
-          transaction.set(newBattleDocRef, {
+          
+          const newBattleRef = doc(collection(db, "battles"));
+          transaction.set(newBattleRef, {
             player1: player1Data,
             status: 'waiting',
             difficulty: lobby.name,
@@ -311,11 +311,15 @@ export default function ArenaPage() {
           });
           
           toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
-          return newBattleDocRef.id;
+          return newBattleRef.id;
         }
       });
 
-      setBattleId(battleDocRefId);
+      if (battleDocRefId) {
+        setBattleId(battleDocRefId);
+      } else {
+        throw new Error("Transaction did not return a battle ID.");
+      }
     } catch (error) {
       console.error("Matchmaking transaction failed:", error);
       toast({ title: "Error Creating Match", description: "Could not find or create a match. Please try again.", variant: "destructive" });
@@ -747,5 +751,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
