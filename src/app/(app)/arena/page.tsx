@@ -249,25 +249,27 @@ export default function ArenaPage() {
     setGameState('searching');
     setSelectedLobbyName(lobby.name);
 
-    // Efficient query for any open battle in the lobby that is not ours
+    // Simplified query to get waiting battles for the lobby
     const waitingBattlesQuery = query(
       collection(db, "battles"),
       where("difficulty", "==", lobby.name),
       where("status", "==", "waiting"),
-      where("player1.id", "!=", player.id),
-      limit(1)
+      limit(10) // Fetch a few to find one that isn't ours
     );
 
     const querySnapshot = await getDocs(waitingBattlesQuery);
+
+    // Find the first battle that isn't the current player's
+    const availableBattle = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
     
-    if (!querySnapshot.empty) {
-        // Join an existing battle using a transaction to prevent race conditions
-        const battleDocRef = querySnapshot.docs[0].ref;
+    if (availableBattle) {
+        // Join the existing battle using a transaction
+        const battleDocRef = availableBattle.ref;
         try {
             await runTransaction(db, async (transaction) => {
                 const battleDoc = await transaction.get(battleDocRef);
                 if (!battleDoc.exists() || battleDoc.data().status !== 'waiting') {
-                    throw "Battle is no longer available.";
+                    throw new Error("Battle is no longer available.");
                 }
 
                 const player2Data = {
@@ -289,11 +291,11 @@ export default function ArenaPage() {
             toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
         } catch (error) {
             console.error("Failed to join battle:", error);
-            toast({ title: "Matchmaking Failed", description: "Could not join the match, it might have been taken. Searching again.", variant: "destructive" });
-            findOrCreateBattle(lobby); // Retry finding a battle
+            toast({ title: "Matchmaking Failed", description: "Could not join the match. It might have been taken. Searching again.", variant: "destructive" });
+            findOrCreateBattle(lobby); // Retry
         }
     } else {
-        // Create a new battle
+        // No available battles, so create a new one
         try {
             const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
             if (!question.solution) throw new Error("AI failed to provide a valid solution.");
@@ -322,7 +324,7 @@ export default function ArenaPage() {
             toast({ title: "Error Creating Match", description: "Could not generate a challenge. Please try again.", variant: "destructive" });
             resetGameState(true);
             const playerRef = doc(db, "players", player.id);
-            await updateDoc(playerRef, { coins: player.coins + lobby.entryFee }); // Refund fee on creation failure
+            await updateDoc(playerRef, { coins: player.coins + lobby.entryFee }); // Refund fee
         }
     }
   }, [player, toast]);
@@ -723,6 +725,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
