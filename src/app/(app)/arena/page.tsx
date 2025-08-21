@@ -48,7 +48,7 @@ export default function ArenaPage() {
   const router = useRouter();
 
   const [gameState, setGameState] = useState<GameState>('selectingLobby');
-  const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
+  const selectedLobbyNameRef = useRef<DifficultyLobby | null>(null);
   const [code, setCode] = useState<string>('');
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE);
   const [timeRemaining, setTimeRemaining] = useState(0);
@@ -63,7 +63,7 @@ export default function ArenaPage() {
   const resetGameState = (backToLobbySelection = true) => {
     if (backToLobbySelection) {
       setGameState('selectingLobby');
-      setSelectedLobbyName(null);
+      selectedLobbyNameRef.current = null;
     }
     setCode('');
     setLanguage(DEFAULT_LANGUAGE);
@@ -245,32 +245,26 @@ export default function ArenaPage() {
 
   const findOrCreateBattle = useCallback(async (lobby: LobbyInfo) => {
     if (!player) return;
-
-    setGameState('searching');
-    setSelectedLobbyName(lobby.name);
-
-    // Simplified query to get waiting battles for the lobby
-    const waitingBattlesQuery = query(
-      collection(db, "battles"),
-      where("difficulty", "==", lobby.name),
-      where("status", "==", "waiting"),
-      limit(10) // Fetch a few to find one that isn't ours
-    );
-
-    const querySnapshot = await getDocs(waitingBattlesQuery);
-
-    // Find the first battle that isn't the current player's
-    const availableBattle = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
     
-    if (availableBattle) {
-        // Join the existing battle using a transaction
-        const battleDocRef = availableBattle.ref;
-        try {
-            await runTransaction(db, async (transaction) => {
-                const battleDoc = await transaction.get(battleDocRef);
-                if (!battleDoc.exists() || battleDoc.data().status !== 'waiting') {
-                    throw new Error("Battle is no longer available.");
-                }
+    setGameState('searching');
+    selectedLobbyNameRef.current = lobby.name;
+    
+    try {
+        const battleDocRefId = await runTransaction(db, async (transaction) => {
+            const waitingBattlesQuery = query(
+                collection(db, "battles"),
+                where("difficulty", "==", lobby.name),
+                where("status", "==", "waiting"),
+                where("player1.id", "!=", player.id),
+                limit(1)
+            );
+            
+            const querySnapshot = await getDocs(waitingBattlesQuery);
+            
+            if (!querySnapshot.empty) {
+                // Found a battle to join
+                const battleDoc = querySnapshot.docs[0];
+                const battleDocRef = doc(db, 'battles', battleDoc.id);
 
                 const player2Data = {
                     id: player.id,
@@ -286,46 +280,47 @@ export default function ArenaPage() {
                     status: "in-progress",
                     startedAt: serverTimestamp()
                 });
-            });
-            setBattleId(battleDocRef.id);
-            toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
-        } catch (error) {
-            console.error("Failed to join battle:", error);
-            toast({ title: "Matchmaking Failed", description: "Could not join the match. It might have been taken. Searching again.", variant: "destructive" });
-            findOrCreateBattle(lobby); // Retry
-        }
-    } else {
-        // No available battles, so create a new one
-        try {
-            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
-            if (!question.solution) throw new Error("AI failed to provide a valid solution.");
+                
+                toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
+                return battleDoc.id;
 
-            const player1Data = {
-                id: player.id,
-                username: player.username,
-                avatarUrl: player.avatarUrl,
-                language: DEFAULT_LANGUAGE,
-                code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
-                hasSubmitted: false
-            };
+            } else {
+                // No available battles, so create a new one
+                const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+                if (!question.solution) throw new Error("AI failed to provide a valid solution.");
 
-            const newBattleDoc = await addDoc(collection(db, "battles"), {
-                player1: player1Data,
-                status: "waiting",
-                difficulty: lobby.name,
-                wager: lobby.entryFee,
-                question,
-                createdAt: serverTimestamp(),
-            });
-            setBattleId(newBattleDoc.id);
-            toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
-        } catch(e) {
-            console.error("Failed to create battle:", e);
-            toast({ title: "Error Creating Match", description: "Could not generate a challenge. Please try again.", variant: "destructive" });
-            resetGameState(true);
-            const playerRef = doc(db, "players", player.id);
-            await updateDoc(playerRef, { coins: player.coins + lobby.entryFee }); // Refund fee
-        }
+                const player1Data = {
+                    id: player.id,
+                    username: player.username,
+                    avatarUrl: player.avatarUrl,
+                    language: DEFAULT_LANGUAGE,
+                    code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
+                    hasSubmitted: false
+                };
+                
+                const newBattleDocRef = doc(collection(db, "battles"));
+                transaction.set(newBattleDocRef, {
+                    player1: player1Data,
+                    status: "waiting",
+                    difficulty: lobby.name,
+                    wager: lobby.entryFee,
+                    question,
+                    createdAt: serverTimestamp(),
+                });
+                
+                toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
+                return newBattleDocRef.id;
+            }
+        });
+        
+        setBattleId(battleDocRefId);
+
+    } catch (error) {
+        console.error("Matchmaking transaction failed:", error);
+        toast({ title: "Error Creating Match", description: "Could not find or create a match. Please try again.", variant: "destructive" });
+        resetGameState(true);
+        const playerRef = doc(db, "players", player.id);
+        await updateDoc(playerRef, { coins: player.coins + lobby.entryFee }); // Refund fee
     }
   }, [player, toast]);
 
@@ -334,7 +329,7 @@ export default function ArenaPage() {
       if (!player) return;
       
       setGameState('searching');
-      setSelectedLobbyName(lobby.name);
+      selectedLobbyNameRef.current = lobby.name;
 
       try {
           const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
@@ -420,15 +415,16 @@ export default function ArenaPage() {
     if (!battleId || !player || !IS_FIREBASE_CONFIGURED) return;
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
+      const currentGameState = gameStateRef.current;
+      
       if (!docSnap.exists()) {
-        if (gameState !== 'selectingLobby' && gameState !== 'gameOver') {
+        if (currentGameState !== 'selectingLobby' && currentGameState !== 'gameOver') {
             toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
             resetGameState(true);
         }
         return;
       }
       
-      const currentGameState = gameState;
       const battle = { id: docSnap.id, ...docSnap.data() } as Battle;
       setBattleData(battle);
       
@@ -455,8 +451,13 @@ export default function ArenaPage() {
     });
 
     return () => unsub();
-  }, [battleId, player, handleSubmissionFinalization, toast, router, gameState, processGameEnd]);
+  }, [battleId, player, handleSubmissionFinalization, toast, router, processGameEnd]);
 
+  // Use a ref to get the latest gameState in the onSnapshot callback
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
   const handleSubmitCode = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -526,7 +527,7 @@ export default function ArenaPage() {
     const isSearching = gameState === 'searching';
     const isInGame = gameState === 'inGame';
     
-    if (isSearching && selectedLobbyName) {
+    if (isSearching && selectedLobbyNameRef.current) {
         if (IS_FIREBASE_CONFIGURED) {
             try {
                 if (battleId) {
@@ -538,7 +539,7 @@ export default function ArenaPage() {
                         await deleteDoc(battleDocRef);
                     }
                 }
-                const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
+                const lobby = LOBBIES.find(l => l.name === selectedLobbyNameRef.current);
                 if (lobby) {
                     const playerRef = doc(db, "players", player.id);
                     await updateDoc(playerRef, { coins: player.coins + lobby.entryFee });
@@ -632,7 +633,7 @@ export default function ArenaPage() {
         case 'searching':
             return (
                 <SearchingView
-                    selectedLobbyName={selectedLobbyName}
+                    selectedLobbyName={selectedLobbyNameRef.current}
                     onCancelSearch={() => setShowLeaveConfirm(true)}
                 />
             );
@@ -725,13 +726,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
-
-    
-
-    
-
-    
