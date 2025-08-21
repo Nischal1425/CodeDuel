@@ -18,7 +18,8 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, arrayUnion, runTransaction } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, arrayUnion, runTransaction, documentId } from "firebase/firestore";
+
 
 // Component Imports
 import { LobbySelection } from './_components/LobbySelection';
@@ -85,7 +86,6 @@ export default function ArenaPage() {
  const processGameEnd = useCallback(async (battle: Battle) => {
     if (!player) return;
     
-    // Ensure this runs only once per player per match conclusion
     const hasProcessedKey = `processed_match_${battle.id}`;
     if (sessionStorage.getItem(hasProcessedKey)) return;
     sessionStorage.setItem(hasProcessedKey, 'true');
@@ -95,18 +95,18 @@ export default function ArenaPage() {
     let toastTitle = "Match Over";
     let toastDesc = "The match has concluded.";
     let toastVariant: "default" | "destructive" = "default";
-    let coin_change = 0;
+    let coin_change = 0; // The net change in coins for the player
 
     if (battle.status === 'forfeited') {
         if (battle.winnerId === player.id) {
             outcome = 'win';
-            const winnings = (entryFee * 2) - Math.floor(entryFee * 2 * COMMISSION_RATE);
+            const winnings = (entryFee * 2) * (1 - COMMISSION_RATE); // player gets both entry fees, minus commission
             coin_change = winnings - entryFee; // Net gain
             toastTitle="Victory by Forfeit!";
-            toastDesc=`Your opponent forfeited. You won ${winnings} coins.`;
+            toastDesc=`Your opponent forfeited. You won ${Math.floor(winnings)} coins.`;
         } else {
             outcome = 'loss';
-            coin_change = -entryFee;
+            coin_change = -entryFee; // Forfeiter loses their fee
             toastTitle="You Forfeited";
             toastDesc=`You forfeited the match and lost ${entryFee} coins.`;
             toastVariant="destructive";
@@ -114,18 +114,18 @@ export default function ArenaPage() {
     } else { // Completed
         if (battle.winnerId === player.id) {
             outcome = 'win';
-            const winnings = (entryFee * 2) - Math.floor(entryFee * 2 * COMMISSION_RATE);
-            coin_change = winnings - entryFee; // Net gain
+            const winnings = (entryFee * 2) * (1 - COMMISSION_RATE);
+            coin_change = winnings - entryFee;
             toastTitle="Victory!";
-            toastDesc=`You won the duel! You won ${winnings} coins.`;
+            toastDesc=`You won the duel! You won ${Math.floor(winnings)} coins.`;
         } else if (!battle.winnerId) {
             outcome = 'draw';
-            coin_change = 0; // Fee already deducted, now refunded effectively
+            coin_change = 0; // Fee was taken, now refunded. Net change is 0.
             toastTitle="Draw!";
             toastDesc=`The duel ended in a draw. Your entry fee of ${entryFee} coins was refunded.`;
         } else {
             outcome = 'loss';
-            coin_change = -entryFee;
+            coin_change = -entryFee; // Loser loses their fee
             toastTitle="Defeat";
             toastDesc="Your opponent's solution was deemed superior.";
             toastVariant="destructive";
@@ -156,13 +156,15 @@ export default function ArenaPage() {
                 if (!playerDoc.exists()) throw "Player document does not exist!";
 
                 const currentCoins = playerDoc.data().coins || 0;
+                let newCoins = currentCoins;
                 
-                let newCoins;
-                if(outcome === 'draw'){
-                    newCoins = currentCoins + battle.wager; // Refund
-                } else {
-                    newCoins = currentCoins + (outcome === 'win' ? (battle.wager * 2 * (1-COMMISSION_RATE)) : 0);
+                // On match start, the fee is deducted. Here we add back any winnings or refunds.
+                if (outcome === 'win') {
+                    newCoins += (battle.wager * 2 * (1 - COMMISSION_RATE));
+                } else if (outcome === 'draw') {
+                    newCoins += battle.wager; // Refund entry fee
                 }
+                // In case of a loss, no coins are returned, so balance remains as it was after deduction.
 
                 transaction.update(playerRef, {
                     coins: Math.floor(newCoins),
@@ -247,39 +249,49 @@ export default function ArenaPage() {
     setGameState('searching');
     setSelectedLobbyName(lobby.name);
 
-    // Simplified query to avoid composite index requirement
+    // More robust query to find a battle not created by the current player
     const waitingBattlesQuery = query(
-        collection(db, "battles"), 
-        where("difficulty", "==", lobby.name), 
+        collection(db, "battles"),
+        where("difficulty", "==", lobby.name),
         where("status", "==", "waiting"),
-        limit(10) // Fetch a few to filter locally
+        where("player1.id", "!=", player.id),
+        limit(1)
     );
 
     const querySnapshot = await getDocs(waitingBattlesQuery);
-    
-    // Filter out battles created by the current player
-    const availableBattle = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
-    if (availableBattle) {
-        // Join an existing battle
-        const battleDoc = availableBattle;
-        setBattleId(battleDoc.id);
+    if (!querySnapshot.empty) {
+        // Join an existing battle using a transaction to prevent race conditions
+        const battleDocRef = querySnapshot.docs[0].ref;
+        try {
+            await runTransaction(db, async (transaction) => {
+                const battleDoc = await transaction.get(battleDocRef);
+                if (!battleDoc.exists() || battleDoc.data().status !== 'waiting') {
+                    throw "Battle is no longer available.";
+                }
 
-        const player2Data = {
-            id: player.id,
-            username: player.username,
-            avatarUrl: player.avatarUrl,
-            language: DEFAULT_LANGUAGE,
-            code: getCodePlaceholder(DEFAULT_LANGUAGE, battleDoc.data().question),
-            hasSubmitted: false
-        };
-        await updateDoc(battleDoc.ref, {
-            player2: player2Data,
-            status: "in-progress",
-            startedAt: serverTimestamp()
-        });
-        toast({ title: "Opponent Found!", description: `Joined duel against ${battleDoc.data().player1.username}`, className: "bg-green-500 text-white" });
+                const player2Data = {
+                    id: player.id,
+                    username: player.username,
+                    avatarUrl: player.avatarUrl,
+                    language: DEFAULT_LANGUAGE,
+                    code: getCodePlaceholder(DEFAULT_LANGUAGE, battleDoc.data().question),
+                    hasSubmitted: false
+                };
 
+                transaction.update(battleDocRef, {
+                    player2: player2Data,
+                    status: "in-progress",
+                    startedAt: serverTimestamp()
+                });
+            });
+            setBattleId(battleDocRef.id);
+            toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
+        } catch (error) {
+            console.error("Failed to join battle:", error);
+            toast({ title: "Matchmaking Failed", description: "Could not join the match, it might have been taken. Searching again.", variant: "destructive" });
+            findOrCreateBattle(lobby); // Retry finding a battle
+        }
     } else {
         // Create a new battle
         try {
@@ -309,12 +321,12 @@ export default function ArenaPage() {
             console.error("Failed to create battle:", e);
             toast({ title: "Error Creating Match", description: "Could not generate a challenge. Please try again.", variant: "destructive" });
             resetGameState(true);
-            // Refund fee on failure
             const playerRef = doc(db, "players", player.id);
-            await updateDoc(playerRef, { coins: player.coins + lobby.entryFee });
+            await updateDoc(playerRef, { coins: player.coins + lobby.entryFee }); // Refund fee on creation failure
         }
     }
   }, [player, toast]);
+
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
       if (!player) return;
@@ -366,7 +378,6 @@ export default function ArenaPage() {
           console.error("Failed to create bot match:", e);
           toast({ title: "Error Creating Match", description: "Could not generate a challenge. Please try again.", variant: "destructive" });
           resetGameState(true);
-          // Bot mode doesn't need firestore refund, local state was updated optimistically
       }
   }, [player, toast]);
 
@@ -381,21 +392,23 @@ export default function ArenaPage() {
         return;
     }
 
-    toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
-    
     if (IS_FIREBASE_CONFIGURED) {
       try {
-        const playerRef = doc(db, "players", player.id);
-        await updateDoc(playerRef, {
-            coins: player.coins - lobbyInfo.entryFee
+        await runTransaction(db, async (transaction) => {
+            const playerRef = doc(db, "players", player.id);
+            const playerDoc = await transaction.get(playerRef);
+            if (!playerDoc.exists() || (playerDoc.data().coins || 0) < lobbyInfo.entryFee) {
+                throw new Error("Insufficient coins.");
+            }
+            const newCoins = (playerDoc.data().coins || 0) - lobbyInfo.entryFee;
+            transaction.update(playerRef, { coins: newCoins });
         });
+        toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
         findOrCreateBattle(lobbyInfo);
       } catch (error) {
-        toast({ title: "Error", description: "Failed to deduct coins. Please try again.", variant: "destructive" });
+        toast({ title: "Error", description: "Failed to enter lobby. Please try again.", variant: "destructive" });
       }
     } else {
-        // In bot mode, we don't persist coin changes, so we just proceed.
-        // The coin balance will appear to decrease locally due to state updates, but will reset on refresh.
         startBotMatch(lobbyInfo);
     }
   };
@@ -406,7 +419,7 @@ export default function ArenaPage() {
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       if (!docSnap.exists()) {
-        if (gameState !== 'selectingLobby') {
+        if (gameState !== 'selectingLobby' && gameState !== 'gameOver') {
             toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
             resetGameState(true);
         }
@@ -422,13 +435,8 @@ export default function ArenaPage() {
         setTimeRemaining(LOBBIES.find(l => l.name === battle.difficulty)!.baseTime * 60);
       }
       
-      if(battle.status === 'completed' || battle.status === 'forfeited') {
-         if(currentGameState !== 'gameOver') {
-            const currentBattle = battleDataRef.current;
-            if(currentBattle?.status !== 'completed' && currentBattle?.status !== 'forfeited') {
-               processGameEnd(battle);
-            }
-         }
+      if((battle.status === 'completed' || battle.status === 'forfeited') && currentGameState !== 'gameOver') {
+         processGameEnd(battle);
          setGameState('gameOver');
       }
       
@@ -484,7 +492,7 @@ export default function ArenaPage() {
   };
 
   const handleTimeUp = async () => {
-    if (!battleData || !player) return;
+    if (!battleData || !player || battleDataRef.current?.status !== 'in-progress') return;
     
     if (IS_FIREBASE_CONFIGURED) {
         const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
@@ -494,11 +502,9 @@ export default function ArenaPage() {
                 winnerId: opponent.id
             });
         } else {
-            // Both timed out, becomes a draw. P1 handles the update.
             if(player.id === battleData.player1.id) {
                await updateDoc(doc(db, "battles", battleData.id), { status: 'completed', winnerId: null });
             }
-            toast({ title: "Time's Up!", description: "The timer has expired.", variant: "destructive" });
         }
     } else {
         // Bot mode timeout
@@ -518,27 +524,32 @@ export default function ArenaPage() {
     const isSearching = gameState === 'searching';
     const isInGame = gameState === 'inGame';
     
-    if (isSearching) {
-        try {
-            if (IS_FIREBASE_CONFIGURED && battleId) {
-                // To prevent race conditions, only delete if the user is still player1 (creator)
-                const battleDoc = await getDocs(query(collection(db, "battles"), where("id", "==", battleId)));
-                const currentBattle = battleDoc.docs[0]?.data();
-                if (currentBattle && currentBattle.player1.id === player.id && !currentBattle.player2) {
-                    await deleteDoc(doc(db, 'battles', battleId));
+    if (isSearching && selectedLobbyName) {
+        if (IS_FIREBASE_CONFIGURED) {
+            try {
+                if (battleId) {
+                    const battleDocRef = doc(db, 'battles', battleId);
+                    const battleDoc = await getDocs(query(collection(db, "battles"), where(documentId(), "==", battleId)));
+                    const currentBattle = battleDoc.docs[0]?.data();
+
+                    if (currentBattle && currentBattle.player1.id === player.id && !currentBattle.player2) {
+                        await deleteDoc(battleDocRef);
+                    }
                 }
+                const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
+                if (lobby) {
+                    const playerRef = doc(db, "players", player.id);
+                    await updateDoc(playerRef, { coins: player.coins + lobby.entryFee });
+                    toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
+                }
+            } catch (error) {
+                console.error("Error cancelling search:", error);
+                toast({ title: "Error", description: "Could not cancel the search.", variant: "destructive" });
+            } finally {
+                resetGameState(true);
             }
-            const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
-            if (lobby && IS_FIREBASE_CONFIGURED) {
-                const playerRef = doc(db, "players", player.id);
-                await updateDoc(playerRef, { coins: player.coins + lobby.entryFee });
-                toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
-            }
-            resetGameState(true);
-        } catch (error) {
-            console.error("Error cancelling search:", error);
-            toast({ title: "Error", description: "Could not cancel the search. Please try again.", variant: "destructive" });
-            resetGameState(true);
+        } else {
+             resetGameState(true);
         }
     } 
     else if (isInGame && battleData) {
@@ -712,5 +723,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
