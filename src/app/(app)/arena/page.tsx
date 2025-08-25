@@ -235,6 +235,7 @@ export default function ArenaPage() {
     if (!player) return;
 
     try {
+        // --- READ PHASE (OUTSIDE TRANSACTION) ---
         const battlesRef = collection(db, "battles");
         const waitingBattlesQuery = query(
             battlesRef,
@@ -242,15 +243,13 @@ export default function ArenaPage() {
             where("status", "==", "waiting"),
             limit(10)
         );
-
-        // Perform read OUTSIDE transaction
         const querySnapshot = await getDocs(waitingBattlesQuery);
         const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
         if (availableBattleDoc) {
+            // --- ATOMIC WRITE PHASE (INSIDE TRANSACTION) ---
             const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
             try {
-                // Perform atomic update INSIDE transaction
                 await runTransaction(db, async (transaction) => {
                     const freshBattleDoc = await transaction.get(battleDocRef);
                     if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
@@ -265,7 +264,6 @@ export default function ArenaPage() {
                         code: getCodePlaceholder(DEFAULT_LANGUAGE, freshBattleDoc.data().question),
                         hasSubmitted: false,
                     };
-
                     transaction.update(battleDocRef, {
                         player2: player2Data,
                         status: 'in-progress',
@@ -280,7 +278,7 @@ export default function ArenaPage() {
             }
         }
 
-        // If no battle was joined, create a new one
+        // --- NO BATTLE FOUND, CREATE A NEW ONE ---
         const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
         if (!question.solution) throw new Error("AI failed to provide a valid solution.");
 
@@ -421,6 +419,7 @@ export default function ArenaPage() {
             if (currentState === 'searching') {
                 const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty);
                 if (lobby) setTimeRemaining(lobby.baseTime * 60);
+                toast({ title: "Opponent Found!", description: "Your duel is starting now!", className: "bg-green-500 text-white" });
                 return 'inGame';
             }
             return currentState;
