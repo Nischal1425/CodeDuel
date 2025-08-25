@@ -441,43 +441,50 @@ export default function ArenaPage() {
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       
       if (!docSnap.exists()) {
-        if (gameState !== 'selectingLobby' && gameState !== 'gameOver') {
-            toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
-            resetGameState(true);
-        }
+        // use a function form of setGameState to get the latest state
+        setGameState(currentGameState => {
+            if (currentGameState !== 'selectingLobby' && currentGameState !== 'gameOver') {
+                toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
+                resetGameState(true);
+            }
+            return currentGameState; // return current state if no change
+        });
         return;
       }
       
       const newBattleData = { id: docSnap.id, ...docSnap.data() } as Battle;
-      const oldBattleData = battleData;
-      setBattleData(newBattleData);
+      setBattleData(newBattleData); // This triggers re-renders, keep deps minimal
       
-      // Crucial fix: Transition to 'inGame' for BOTH players when status changes.
-      if (newBattleData.status === 'in-progress' && oldBattleData?.status !== 'in-progress') {
-        setGameState('inGame');
-        setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
-      }
-      
-      if((newBattleData.status === 'completed' || newBattleData.status === 'forfeited') && gameState !== 'gameOver') {
-         processGameEnd(newBattleData);
-         setGameState('gameOver');
-      }
-      
-      if (newBattleData.status === 'comparing' && gameState !== 'submittingComparison' && gameState !== 'gameOver') {
-        setGameState('submittingComparison');
-      }
-
-      // Designate P1 to trigger comparison to prevent duplicate runs
-      if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
-        if (player.id === newBattleData.player1.id) { 
-          await updateDoc(docSnap.ref, { status: 'comparing' });
-          handleSubmissionFinalization(newBattleData);
+      // Use function form of setGameState to avoid dependency on gameState
+      setGameState(currentGameState => {
+        if (newBattleData.status === 'in-progress' && currentGameState !== 'inGame') {
+            setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
+            return 'inGame';
         }
-      }
+
+        if ((newBattleData.status === 'completed' || newBattleData.status === 'forfeited') && currentGameState !== 'gameOver') {
+            processGameEnd(newBattleData);
+            return 'gameOver';
+        }
+
+        if (newBattleData.status === 'comparing' && currentGameState !== 'submittingComparison' && currentGameState !== 'gameOver') {
+            return 'submittingComparison';
+        }
+
+        // Designate P1 to trigger comparison to prevent duplicate runs
+        if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
+            if (player.id === newBattleData.player1.id) { 
+                updateDoc(docSnap.ref, { status: 'comparing' }); // This write triggers the listener again
+                handleSubmissionFinalization(newBattleData);
+            }
+        }
+        
+        return currentGameState; // No state change needed
+      });
     });
 
     return () => unsub();
-  }, [battleId, player, handleSubmissionFinalization, toast, router, processGameEnd, gameState, battleData]);
+  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, router]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -547,10 +554,9 @@ export default function ArenaPage() {
     if (!player) return;
     setShowLeaveConfirm(false);
 
-    const isSearching = gameState === 'searching';
-    const isInGame = gameState === 'inGame';
+    const currentGameState = gameState; // Capture current state
     
-    if (isSearching && selectedLobbyNameRef.current) {
+    if (currentGameState === 'searching' && selectedLobbyNameRef.current) {
         if (IS_FIREBASE_CONFIGURED && battleId) {
             try {
                 // Use a transaction to safely delete the game if I'm P1 and P2 hasn't joined.
@@ -579,7 +585,7 @@ export default function ArenaPage() {
              resetGameState(true);
         }
     } 
-    else if (isInGame && battleData) {
+    else if (currentGameState === 'inGame' && battleData) {
         if (IS_FIREBASE_CONFIGURED) {
             const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
             if (opponent) {
@@ -756,5 +762,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
