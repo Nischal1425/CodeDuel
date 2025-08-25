@@ -247,85 +247,83 @@ export default function ArenaPage() {
     selectedLobbyNameRef.current = lobby.name;
 
     try {
-        const battlesRef = collection(db, "battles");
-        const waitingBattlesQuery = query(
-          battlesRef,
-          where("difficulty", "==", lobby.name),
-          where("status", "==", "waiting"),
-          limit(10)
-        );
-        
-        const querySnapshot = await getDocs(waitingBattlesQuery);
-        
-        const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
-        
-        let battleDocRefId: string | null = null;
-        
-        if (availableBattleDoc) {
-            // Attempt to join the found battle
-            const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
-            try {
-                await runTransaction(db, async (transaction) => {
-                    const freshBattleDoc = await transaction.get(battleDocRef);
-                    if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
-                        throw new Error("Battle is no longer available.");
-                    }
-                    
-                    const player2Data = {
-                        id: player.id,
-                        username: player.username,
-                        avatarUrl: player.avatarUrl,
-                        language: DEFAULT_LANGUAGE,
-                        code: getCodePlaceholder(DEFAULT_LANGUAGE, freshBattleDoc.data().question),
-                        hasSubmitted: false,
-                    };
-                    
-                    transaction.update(battleDocRef, {
-                        player2: player2Data,
-                        status: 'in-progress',
-                        startedAt: serverTimestamp(),
-                    });
-                });
-                battleDocRefId = availableBattleDoc.id;
-                toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
-            } catch (e) {
-                // Transaction failed, likely because another player joined first.
-                // We'll proceed to create a new game.
-                console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
+      // 1. Query for available battles outside the transaction
+      const battlesRef = collection(db, "battles");
+      const waitingBattlesQuery = query(
+        battlesRef,
+        where("difficulty", "==", lobby.name),
+        where("status", "==", "waiting"),
+        limit(10)
+      );
+      const querySnapshot = await getDocs(waitingBattlesQuery);
+      const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
+
+      let battleDocRefId: string | null = null;
+
+      // 2. If a battle is found, try to join it atomically
+      if (availableBattleDoc) {
+        const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
+        try {
+          await runTransaction(db, async (transaction) => {
+            const freshBattleDoc = await transaction.get(battleDocRef);
+            if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
+              throw new Error("Battle is no longer available.");
             }
-        }
-        
-        if (!battleDocRefId) {
-            // No available battle or failed to join, create a new one.
-            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
-            if (!question.solution) throw new Error("AI failed to provide a valid solution.");
-            
-            const player1Data = {
-                id: player.id,
-                username: player.username,
-                avatarUrl: player.avatarUrl,
-                language: DEFAULT_LANGUAGE,
-                code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
-                hasSubmitted: false,
+
+            const player2Data = {
+              id: player.id,
+              username: player.username,
+              avatarUrl: player.avatarUrl,
+              language: DEFAULT_LANGUAGE,
+              code: getCodePlaceholder(DEFAULT_LANGUAGE, freshBattleDoc.data().question),
+              hasSubmitted: false,
             };
 
-            const newBattleRef = await addDoc(collection(db, "battles"), {
-                player1: player1Data,
-                status: 'waiting',
-                difficulty: lobby.name,
-                wager: lobby.entryFee,
-                question,
-                createdAt: serverTimestamp(),
+            transaction.update(battleDocRef, {
+              player2: player2Data,
+              status: 'in-progress',
+              startedAt: serverTimestamp(),
             });
-            battleDocRefId = newBattleRef.id;
-            toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
+          });
+          battleDocRefId = availableBattleDoc.id;
+          toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
+        } catch (e) {
+          console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
+          // If transaction fails, we fall through to creating a new game.
         }
+      }
 
-        if (battleDocRefId) {
-            setBattleId(battleDocRefId);
-        } else {
-            throw new Error("Matchmaking failed to produce a valid battle ID.");
-        }
+      // 3. If no battle was joined, create a new one.
+      if (!battleDocRefId) {
+        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+        if (!question.solution) throw new Error("AI failed to provide a valid solution.");
+        
+        const player1Data = {
+          id: player.id,
+          username: player.username,
+          avatarUrl: player.avatarUrl,
+          language: DEFAULT_LANGUAGE,
+          code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
+          hasSubmitted: false,
+        };
+
+        const newBattleRef = await addDoc(collection(db, "battles"), {
+          player1: player1Data,
+          status: 'waiting',
+          difficulty: lobby.name,
+          wager: lobby.entryFee,
+          question,
+          createdAt: serverTimestamp(),
+        });
+        battleDocRefId = newBattleRef.id;
+        toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
+      }
+
+      if (battleDocRefId) {
+        setBattleId(battleDocRefId);
+      } else {
+        throw new Error("Matchmaking failed to produce a valid battle ID.");
+      }
 
     } catch (error) {
       console.error("Matchmaking error:", error);
@@ -411,19 +409,24 @@ export default function ArenaPage() {
 
     if (IS_FIREBASE_CONFIGURED) {
       try {
+        // First, deduct the coins in a safe transaction
+        const playerRef = doc(db, "players", player.id);
         await runTransaction(db, async (transaction) => {
-            const playerRef = doc(db, "players", player.id);
-            const playerDoc = await transaction.get(playerRef);
-            if (!playerDoc.exists() || (playerDoc.data().coins || 0) < lobbyInfo.entryFee) {
-                throw new Error("Insufficient coins.");
-            }
-            const newCoins = (playerDoc.data().coins || 0) - lobbyInfo.entryFee;
-            transaction.update(playerRef, { coins: newCoins });
+          const playerDoc = await transaction.get(playerRef);
+          if (!playerDoc.exists() || (playerDoc.data().coins || 0) < lobbyInfo.entryFee) {
+            throw new Error("Insufficient coins.");
+          }
+          const newCoins = (playerDoc.data().coins || 0) - lobbyInfo.entryFee;
+          transaction.update(playerRef, { coins: newCoins });
         });
+        
+        // Only if coin deduction is successful, proceed to find a battle
         toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
         findOrCreateBattle(lobbyInfo);
+
       } catch (error) {
-        toast({ title: "Error", description: "Failed to enter lobby. Please try again.", variant: "destructive" });
+        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+        toast({ title: "Error Entering Lobby", description: `Failed to enter lobby: ${errorMessage}`, variant: "destructive" });
       }
     } else {
         startBotMatch(lobbyInfo);
@@ -758,3 +761,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
