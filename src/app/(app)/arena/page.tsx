@@ -243,12 +243,14 @@ export default function ArenaPage() {
             limit(10)
         );
 
+        // Perform read OUTSIDE transaction
         const querySnapshot = await getDocs(waitingBattlesQuery);
         const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
         if (availableBattleDoc) {
             const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
             try {
+                // Perform atomic update INSIDE transaction
                 await runTransaction(db, async (transaction) => {
                     const freshBattleDoc = await transaction.get(battleDocRef);
                     if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
@@ -271,12 +273,14 @@ export default function ArenaPage() {
                     });
                 });
                 setBattleId(availableBattleDoc.id);
-                return;
+                return; // Successfully joined a battle
             } catch (e) {
                 console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
+                // Continue to create a new battle
             }
         }
 
+        // If no battle was joined, create a new one
         const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
         if (!question.solution) throw new Error("AI failed to provide a valid solution.");
 
