@@ -58,7 +58,7 @@ export default function ArenaPage() {
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
 
-  const resetGameState = (backToLobbySelection = true) => {
+  const resetGameState = useCallback((backToLobbySelection = true) => {
     if (backToLobbySelection) {
       setGameState('selectingLobby');
       selectedLobbyNameRef.current = null;
@@ -69,7 +69,7 @@ export default function ArenaPage() {
     setShowLeaveConfirm(false);
     setBattleId(null);
     setBattleData(null);
-  };
+  }, []);
 
   const showAchievementToast = useCallback((achievement) => {
     toast({
@@ -327,21 +327,8 @@ export default function ArenaPage() {
       console.error("Matchmaking error:", error);
       toast({ title: "Error Creating Match", description: "Could not find or create a match. Please try again.", variant: "destructive" });
       resetGameState(true);
-      // Refund the fee if matchmaking fails
-      const playerRef = doc(db, "players", player.id);
-      try {
-        await runTransaction(db, async (transaction) => {
-            const playerDoc = await transaction.get(playerRef);
-            if(playerDoc.exists()){
-                const newCoins = (playerDoc.data().coins || 0) + lobby.entryFee;
-                transaction.update(playerRef, { coins: newCoins });
-            }
-        });
-      } catch (refundError) {
-        console.error("Failed to refund entry fee:", refundError);
-      }
     }
-  }, [player, toast]);
+  }, [player, toast, resetGameState]);
 
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
@@ -395,7 +382,7 @@ export default function ArenaPage() {
           toast({ title: "Error Creating Match", description: "Could not generate a challenge. Please try again.", variant: "destructive" });
           resetGameState(true);
       }
-  }, [player, toast]);
+  }, [player, toast, resetGameState]);
 
   const handleSelectLobby = async (lobbyName: DifficultyLobby) => {
     if (!player) return;
@@ -441,21 +428,19 @@ export default function ArenaPage() {
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       
       if (!docSnap.exists()) {
-        // use a function form of setGameState to get the latest state
         setGameState(currentGameState => {
             if (currentGameState !== 'selectingLobby' && currentGameState !== 'gameOver') {
                 toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
-                resetGameState(true);
+                resetGameState();
             }
-            return currentGameState; // return current state if no change
+            return 'selectingLobby';
         });
         return;
       }
       
       const newBattleData = { id: docSnap.id, ...docSnap.data() } as Battle;
-      setBattleData(newBattleData); // This triggers re-renders, keep deps minimal
+      setBattleData(newBattleData);
       
-      // Use function form of setGameState to avoid dependency on gameState
       setGameState(currentGameState => {
         if (newBattleData.status === 'in-progress' && currentGameState !== 'inGame') {
             setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
@@ -470,21 +455,20 @@ export default function ArenaPage() {
         if (newBattleData.status === 'comparing' && currentGameState !== 'submittingComparison' && currentGameState !== 'gameOver') {
             return 'submittingComparison';
         }
-
-        // Designate P1 to trigger comparison to prevent duplicate runs
+        
         if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
             if (player.id === newBattleData.player1.id) { 
-                updateDoc(docSnap.ref, { status: 'comparing' }); // This write triggers the listener again
+                updateDoc(docSnap.ref, { status: 'comparing' });
                 handleSubmissionFinalization(newBattleData);
             }
         }
         
-        return currentGameState; // No state change needed
+        return currentGameState;
       });
     });
 
     return () => unsub();
-  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, router]);
+  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -762,6 +746,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
