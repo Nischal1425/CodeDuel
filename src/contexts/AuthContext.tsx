@@ -8,7 +8,7 @@ import { db } from '@/lib/firebase';
 import { doc, onSnapshot } from "firebase/firestore";
 
 // Determine if Firebase is configured
-const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
 interface AuthContextType {
   player: Player | null;
