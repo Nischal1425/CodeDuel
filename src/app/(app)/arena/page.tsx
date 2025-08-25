@@ -57,8 +57,6 @@ export default function ArenaPage() {
   // Real-time battle state
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
-  const battleDataRef = useRef(battleData);
-  useEffect(() => { battleDataRef.current = battleData }, [battleData]);
 
   const resetGameState = (backToLobbySelection = true) => {
     if (backToLobbySelection) {
@@ -332,10 +330,13 @@ export default function ArenaPage() {
       // Refund the fee if matchmaking fails
       const playerRef = doc(db, "players", player.id);
       try {
-        const playerSnap = await getDoc(playerRef);
-        if (playerSnap.exists()) {
-          await updateDoc(playerRef, { coins: (playerSnap.data().coins || 0) + lobby.entryFee });
-        }
+        await runTransaction(db, async (transaction) => {
+            const playerDoc = await transaction.get(playerRef);
+            if(playerDoc.exists()){
+                const newCoins = (playerDoc.data().coins || 0) + lobby.entryFee;
+                transaction.update(playerRef, { coins: newCoins });
+            }
+        });
       } catch (refundError) {
         console.error("Failed to refund entry fee:", refundError);
       }
@@ -422,7 +423,7 @@ export default function ArenaPage() {
         
         // Only if coin deduction is successful, proceed to find a battle
         toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
-        findOrCreateBattle(lobbyInfo);
+        await findOrCreateBattle(lobbyInfo);
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
@@ -433,57 +434,51 @@ export default function ArenaPage() {
     }
   };
   
-    // Real-time listener for battle updates
+  // Real-time listener for battle updates
   useEffect(() => {
     if (!battleId || !player || !IS_FIREBASE_CONFIGURED) return;
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
-      const currentGameState = gameStateRef.current;
       
       if (!docSnap.exists()) {
-        if (currentGameState !== 'selectingLobby' && currentGameState !== 'gameOver') {
+        if (gameState !== 'selectingLobby' && gameState !== 'gameOver') {
             toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
             resetGameState(true);
         }
         return;
       }
       
-      const battle = { id: docSnap.id, ...docSnap.data() } as Battle;
-      const oldBattle = battleDataRef.current;
-      setBattleData(battle);
+      const newBattleData = { id: docSnap.id, ...docSnap.data() } as Battle;
+      const oldBattleData = battleData;
+      setBattleData(newBattleData);
       
-      // THIS IS THE KEY FIX for starting the game for both players
-      if (battle.status === 'in-progress' && oldBattle?.status !== 'in-progress') {
+      // Crucial fix: Transition to 'inGame' for BOTH players when status changes.
+      if (newBattleData.status === 'in-progress' && oldBattleData?.status !== 'in-progress') {
         setGameState('inGame');
-        setTimeRemaining(LOBBIES.find(l => l.name === battle.difficulty)!.baseTime * 60);
+        setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
       }
       
-      if((battle.status === 'completed' || battle.status === 'forfeited') && currentGameState !== 'gameOver') {
-         processGameEnd(battle);
+      if((newBattleData.status === 'completed' || newBattleData.status === 'forfeited') && gameState !== 'gameOver') {
+         processGameEnd(newBattleData);
          setGameState('gameOver');
       }
       
-      if (battle.status === 'comparing' && currentGameState !== 'submittingComparison' && currentGameState !== 'gameOver') {
+      if (newBattleData.status === 'comparing' && gameState !== 'submittingComparison' && gameState !== 'gameOver') {
         setGameState('submittingComparison');
       }
 
       // Designate P1 to trigger comparison to prevent duplicate runs
-      if (battle.player1.hasSubmitted && battle.player2?.hasSubmitted && battle.status === 'in-progress') {
-        if (player.id === battle.player1.id) { 
+      if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
+        if (player.id === newBattleData.player1.id) { 
           await updateDoc(docSnap.ref, { status: 'comparing' });
-          handleSubmissionFinalization(battle);
+          handleSubmissionFinalization(newBattleData);
         }
       }
     });
 
     return () => unsub();
-  }, [battleId, player, handleSubmissionFinalization, toast, router, processGameEnd]);
+  }, [battleId, player, handleSubmissionFinalization, toast, router, processGameEnd, gameState, battleData]);
 
-  // Use a ref to get the latest gameState in the onSnapshot callback
-  const gameStateRef = useRef(gameState);
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
 
   const handleSubmitCode = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -521,7 +516,7 @@ export default function ArenaPage() {
   };
 
   const handleTimeUp = async () => {
-    if (!battleData || !player || battleDataRef.current?.status !== 'in-progress') return;
+    if (!battleData || !player || battleData.status !== 'in-progress') return;
     
     if (IS_FIREBASE_CONFIGURED) {
         const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
@@ -762,3 +757,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
   );
 }
 
+    
