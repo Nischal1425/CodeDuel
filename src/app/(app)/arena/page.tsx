@@ -280,7 +280,6 @@ export default function ArenaPage() {
                     });
                 });
                 setBattleId(availableBattleDoc.id);
-                toast({ title: "Opponent Found!", description: "Joined a duel.", className: "bg-green-500 text-white" });
                 return;
             } catch (e) {
                 console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
@@ -308,7 +307,6 @@ export default function ArenaPage() {
             createdAt: serverTimestamp(),
         });
         setBattleId(newBattleRef.id);
-        toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
 
     } catch (error) {
         console.error("Matchmaking error:", error);
@@ -425,8 +423,9 @@ export default function ArenaPage() {
             if (currentState === 'searching') {
                 const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty);
                 if (lobby) setTimeRemaining(lobby.baseTime * 60);
+                return 'inGame';
             }
-            return 'inGame';
+            return currentState;
         });
       }
       
@@ -541,7 +540,8 @@ export default function ArenaPage() {
                         const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
                         const playerSnap = await transaction.get(playerRef);
                          if (playerSnap.exists() && lobby) {
-                            transaction.update(playerRef, { coins: playerSnap.data().coins + lobby.entryFee });
+                            const currentCoins = playerSnap.data().coins || 0;
+                            transaction.update(playerRef, { coins: currentCoins + lobby.entryFee });
                         }
                     }
                 });
