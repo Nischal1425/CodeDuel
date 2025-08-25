@@ -2,7 +2,7 @@
 "use client";
 
 import type { FormEvent } from 'react';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -18,7 +18,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, documentId, getDoc, writeBatch } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, getDoc, writeBatch } from "firebase/firestore";
 
 
 // Component Imports
@@ -43,25 +43,24 @@ const LOBBIES: LobbyInfo[] = [
 ];
 
 export default function ArenaPage() {
-  const { player } = useAuth(); // AuthProvider now gives us a real-time player object
+  const { player } = useAuth(); 
   const { toast } = useToast();
   const router = useRouter();
 
   const [gameState, setGameState] = useState<GameState>('selectingLobby');
-  const selectedLobbyNameRef = useRef<DifficultyLobby | null>(null);
+  const [selectedLobbyName, setSelectedLobbyName] = useState<DifficultyLobby | null>(null);
   const [code, setCode] = useState<string>('');
   const [language, setLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   
-  // Real-time battle state
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
 
   const resetGameState = useCallback((backToLobbySelection = true) => {
     if (backToLobbySelection) {
       setGameState('selectingLobby');
-      selectedLobbyNameRef.current = null;
+      setSelectedLobbyName(null);
     }
     setCode('');
     setLanguage(DEFAULT_LANGUAGE);
@@ -144,7 +143,7 @@ export default function ArenaPage() {
              const playerRef = doc(db, "players", player.id);
              
              const playerSnap = await getDoc(playerRef);
-             if (!playerSnap.exists()) throw "Player not found";
+             if (!playerSnap.exists()) throw new Error("Player not found during game end processing.");
 
              const currentCoins = playerSnap.data().coins || 0;
              let newCoins = currentCoins;
@@ -152,7 +151,7 @@ export default function ArenaPage() {
               if (outcome === 'win') {
                   newCoins += (battle.wager * 2 * (1 - COMMISSION_RATE));
               } else if (outcome === 'draw') {
-                  newCoins += battle.wager; // Refund entry fee
+                  newCoins += battle.wager; 
               }
 
              batch.update(playerRef, {
@@ -210,20 +209,19 @@ export default function ArenaPage() {
         ...currentBattle,
         status: 'completed',
         winnerId: winnerId || undefined,
-        comparisonResult: JSON.parse(JSON.stringify(result)) // Serialize for Firestore/state
+        comparisonResult: JSON.parse(JSON.stringify(result)) 
       };
       
       if (IS_FIREBASE_CONFIGURED) {
           await updateDoc(doc(db, 'battles', currentBattle.id), {
             status: 'completed',
             winnerId: winnerId || null,
-            comparisonResult: JSON.parse(JSON.stringify(result)) // Serialize for Firestore
+            comparisonResult: JSON.parse(JSON.stringify(result)) 
           });
       } else {
-          // Bot mode: update local state and finalize
           setBattleData(finalBattleState);
-          processGameEnd(finalBattleState);
           setGameState('gameOver');
+          await processGameEnd(finalBattleState);
       }
 
     } catch (error) {
@@ -242,10 +240,9 @@ export default function ArenaPage() {
     if (!player) return;
 
     setGameState('searching');
-    selectedLobbyNameRef.current = lobby.name;
+    setSelectedLobbyName(lobby.name);
 
     try {
-      // 1. Query for available battles outside the transaction
       const battlesRef = collection(db, "battles");
       const waitingBattlesQuery = query(
         battlesRef,
@@ -256,9 +253,8 @@ export default function ArenaPage() {
       const querySnapshot = await getDocs(waitingBattlesQuery);
       const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
-      let battleDocRefId: string | null = null;
+      let finalBattleId: string | null = null;
 
-      // 2. If a battle is found, try to join it atomically
       if (availableBattleDoc) {
         const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
         try {
@@ -283,16 +279,14 @@ export default function ArenaPage() {
               startedAt: serverTimestamp(),
             });
           });
-          battleDocRefId = availableBattleDoc.id;
+          finalBattleId = availableBattleDoc.id;
           toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
         } catch (e) {
           console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
-          // If transaction fails, we fall through to creating a new game.
         }
       }
 
-      // 3. If no battle was joined, create a new one.
-      if (!battleDocRefId) {
+      if (!finalBattleId) {
         const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
         if (!question.solution) throw new Error("AI failed to provide a valid solution.");
         
@@ -313,12 +307,12 @@ export default function ArenaPage() {
           question,
           createdAt: serverTimestamp(),
         });
-        battleDocRefId = newBattleRef.id;
+        finalBattleId = newBattleRef.id;
         toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
       }
 
-      if (battleDocRefId) {
-        setBattleId(battleDocRefId);
+      if (finalBattleId) {
+        setBattleId(finalBattleId);
       } else {
         throw new Error("Matchmaking failed to produce a valid battle ID.");
       }
@@ -335,7 +329,7 @@ export default function ArenaPage() {
       if (!player) return;
       
       setGameState('searching');
-      selectedLobbyNameRef.current = lobby.name;
+      setSelectedLobbyName(lobby.name);
 
       try {
           const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
@@ -347,7 +341,7 @@ export default function ArenaPage() {
               avatarUrl: 'https://placehold.co/100x100.png?text=🤖',
               language: 'javascript' as SupportedLanguage,
               code: question.solution,
-              hasSubmitted: true // Bot submits instantly
+              hasSubmitted: true 
           };
           
           const player1Data = {
@@ -397,7 +391,6 @@ export default function ArenaPage() {
 
     if (IS_FIREBASE_CONFIGURED) {
       try {
-        // First, deduct the coins in a safe transaction
         const playerRef = doc(db, "players", player.id);
         await runTransaction(db, async (transaction) => {
           const playerDoc = await transaction.get(playerRef);
@@ -408,7 +401,6 @@ export default function ArenaPage() {
           transaction.update(playerRef, { coins: newCoins });
         });
         
-        // Only if coin deduction is successful, proceed to find a battle
         toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
         await findOrCreateBattle(lobbyInfo);
 
@@ -421,20 +413,14 @@ export default function ArenaPage() {
     }
   };
   
-  // Real-time listener for battle updates
   useEffect(() => {
     if (!battleId || !player || !IS_FIREBASE_CONFIGURED) return;
 
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       
       if (!docSnap.exists()) {
-        setGameState(currentGameState => {
-            if (currentGameState !== 'selectingLobby' && currentGameState !== 'gameOver') {
-                toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
-                resetGameState();
-            }
-            return 'selectingLobby';
-        });
+        toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
+        resetGameState();
         return;
       }
       
@@ -442,20 +428,24 @@ export default function ArenaPage() {
       setBattleData(newBattleData);
       
       setGameState(currentGameState => {
-        if (newBattleData.status === 'in-progress' && currentGameState !== 'inGame') {
+        // Transition from searching to in-game
+        if (newBattleData.status === 'in-progress' && currentGameState === 'searching') {
             setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
             return 'inGame';
         }
-
+        
+        // Transition from in-game to completed/forfeited
         if ((newBattleData.status === 'completed' || newBattleData.status === 'forfeited') && currentGameState !== 'gameOver') {
             processGameEnd(newBattleData);
             return 'gameOver';
         }
 
+        // Both players submitted, now comparing
         if (newBattleData.status === 'comparing' && currentGameState !== 'submittingComparison' && currentGameState !== 'gameOver') {
             return 'submittingComparison';
         }
         
+        // If P1, trigger the finalization
         if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
             if (player.id === newBattleData.player1.id) { 
                 updateDoc(docSnap.ref, { status: 'comparing' });
@@ -484,11 +474,11 @@ export default function ArenaPage() {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         const updatePayload = {
             [`${playerKey}.code`]: code,
+            [`${playerKey}.language`]: language,
             [`${playerKey}.hasSubmitted`]: true
         };
         await updateDoc(doc(db, "battles", battleData.id), updatePayload);
     } else {
-        // Bot mode: update local state and trigger comparison
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (!playerKey || !battleData[playerKey]) return;
 
@@ -497,6 +487,7 @@ export default function ArenaPage() {
             [playerKey]: {
                 ...battleData[playerKey]!,
                 code: code,
+                language: language,
                 hasSubmitted: true,
             }
         };
@@ -511,24 +502,21 @@ export default function ArenaPage() {
     
     if (IS_FIREBASE_CONFIGURED) {
         const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
-        // If opponent has already submitted when my time runs out, I lose.
         if (opponent?.hasSubmitted) {
             await updateDoc(doc(db, "battles", battleData.id), {
                 status: 'forfeited',
                 winnerId: opponent.id
             });
         } else {
-            // If I'm player 1 and time runs out for both, it's a draw. P1 is designated to make this call.
             if(player.id === battleData.player1.id) {
                await updateDoc(doc(db, "battles", battleData.id), { status: 'completed', winnerId: null });
             }
         }
     } else {
-        // Bot mode timeout
         toast({ title: "Time's Up!", description: "You ran out of time and lost the duel.", variant: "destructive" });
         const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
         setBattleData(finalBattleState);
-        processGameEnd(finalBattleState);
+        await processGameEnd(finalBattleState);
         setGameState('gameOver');
     }
   };
@@ -538,12 +526,11 @@ export default function ArenaPage() {
     if (!player) return;
     setShowLeaveConfirm(false);
 
-    const currentGameState = gameState; // Capture current state
+    const currentGameState = gameState; 
     
-    if (currentGameState === 'searching' && selectedLobbyNameRef.current) {
+    if (currentGameState === 'searching' && selectedLobbyName) {
         if (IS_FIREBASE_CONFIGURED && battleId) {
             try {
-                // Use a transaction to safely delete the game if I'm P1 and P2 hasn't joined.
                 await runTransaction(db, async (transaction) => {
                     const battleDocRef = doc(db, 'battles', battleId);
                     const battleDocSnap = await transaction.get(battleDocRef);
@@ -551,17 +538,16 @@ export default function ArenaPage() {
                         transaction.delete(battleDocRef);
 
                         const playerRef = doc(db, "players", player.id);
+                        const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
                         const playerSnap = await transaction.get(playerRef);
-                         if (playerSnap.exists()) {
-                            const lobby = LOBBIES.find(l => l.name === selectedLobbyNameRef.current);
-                            transaction.update(playerRef, { coins: playerSnap.data().coins + (lobby?.entryFee || 0) });
+                         if (playerSnap.exists() && lobby) {
+                            transaction.update(playerRef, { coins: playerSnap.data().coins + lobby.entryFee });
                         }
                     }
                 });
                 toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
             } catch (error) {
                 console.error("Error cancelling search:", error);
-                toast({ title: "Error", description: "Could not cancel the search.", variant: "destructive" });
             } finally {
                 resetGameState(true);
             }
@@ -581,10 +567,9 @@ export default function ArenaPage() {
                  resetGameState(true);
             }
         } else {
-            // Bot mode forfeit
             const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
             setBattleData(finalBattleState);
-            processGameEnd(finalBattleState);
+            await processGameEnd(finalBattleState);
             setGameState('gameOver');
         }
     }
@@ -601,7 +586,7 @@ export default function ArenaPage() {
     } else if (selectedLang === 'cpp') {
         let methodSignature = `void solve(/* parameters */) {\n    // Your code here\n  }`;
         if (signatureFromAI) methodSignature = `${signatureFromAI.replace(/;\s*$/, '')} {\n    // Your code here\n  }`;
-        return `#include <iostream>\n\nclass Solution {\npublic:\n  ${methodSignature}\n};\n`;
+        return `#include <iostream>\n#include <vector>\n#include <string>\n\nclass Solution {\npublic:\n  ${methodSignature}\n};\n`;
     }
     return `// Placeholder for ${selectedLang}.`;
   };
@@ -609,32 +594,43 @@ export default function ArenaPage() {
   useEffect(() => {
     if (battleData?.question && language) {
       const me = battleData?.player1.id === player?.id ? battleData?.player1 : battleData?.player2;
-      // Only set placeholder if code isn't already there from the DB
-      if (me && !me.code) {
+      const meInDb = battleData.player1.id === player?.id ? battleData.player1 : battleData.player2;
+      
+      if (meInDb?.code) {
+        setCode(meInDb.code);
+      } else {
         setCode(getCodePlaceholder(language, battleData.question));
-      } else if (me?.code) {
-        setCode(me.code);
+      }
+
+      if (meInDb?.language) {
+          setLanguage(meInDb.language);
       }
     }
   }, [language, battleData, player]);
 
+
   const onLanguageChange = async (newLang: SupportedLanguage) => {
     if (!player || !battleData) return;
     setLanguage(newLang);
+    setCode(getCodePlaceholder(newLang, battleData.question));
 
     if (IS_FIREBASE_CONFIGURED) {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
-        if (!battleData.player2 && playerKey === 'player2') return; // Cannot update player2 if not present
+        if (!battleData.player2 && playerKey === 'player2') return;
         await updateDoc(doc(db, 'battles', battleData.id), {
-            [`${playerKey}.language`]: newLang
+            [`${playerKey}.language`]: newLang,
+            [`${playerKey}.code`]: getCodePlaceholder(newLang, battleData.question),
         });
     } else {
-        // Update local state in bot mode
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (!playerKey || !battleData[playerKey]) return;
         setBattleData({
             ...battleData,
-            [playerKey]: { ...battleData[playerKey]!, language: newLang }
+            [playerKey]: { 
+                ...battleData[playerKey]!, 
+                language: newLang,
+                code: getCodePlaceholder(newLang, battleData.question)
+            }
         });
     }
   }
@@ -653,7 +649,7 @@ export default function ArenaPage() {
         case 'searching':
             return (
                 <SearchingView
-                    selectedLobbyName={selectedLobbyNameRef.current}
+                    selectedLobbyName={selectedLobbyName}
                     onCancelSearch={() => setShowLeaveConfirm(true)}
                 />
             );
@@ -685,7 +681,6 @@ export default function ArenaPage() {
             );
         case 'gameOver':
             if (!battleData || !player) {
-                // Fallback if somehow we get here without data
                 return (
                     <div className="flex flex-col items-center justify-center h-full text-center p-4">
                         <p className="mb-4">Match data not found.</p>
@@ -746,11 +741,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
-
-    
 
     
