@@ -423,7 +423,8 @@ export default function ArenaPage() {
       if (newBattleData.status === 'in-progress') {
         setGameState(currentState => {
             if (currentState === 'searching') {
-                setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
+                const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty);
+                if (lobby) setTimeRemaining(lobby.baseTime * 60);
             }
             return 'inGame';
         });
