@@ -250,6 +250,7 @@ export default function ArenaPage() {
         where("status", "==", "waiting"),
         limit(10)
       );
+      
       const querySnapshot = await getDocs(waitingBattlesQuery);
       const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
@@ -427,34 +428,41 @@ export default function ArenaPage() {
       const newBattleData = { id: docSnap.id, ...docSnap.data() } as Battle;
       setBattleData(newBattleData);
       
-      setGameState(currentGameState => {
-        // Transition from searching to in-game
-        if (newBattleData.status === 'in-progress' && currentGameState === 'searching') {
-            setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
-            return 'inGame';
-        }
-        
-        // Transition from in-game to completed/forfeited
-        if ((newBattleData.status === 'completed' || newBattleData.status === 'forfeited') && currentGameState !== 'gameOver') {
+      if (newBattleData.status === 'in-progress') {
+        setGameState(currentState => {
+            if (currentState === 'searching') {
+                setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
+                return 'inGame';
+            }
+            return currentState;
+        });
+      }
+      
+      if (newBattleData.status === 'completed' || newBattleData.status === 'forfeited') {
+        setGameState(currentState => {
+          if (currentState !== 'gameOver') {
             processGameEnd(newBattleData);
             return 'gameOver';
-        }
+          }
+          return currentState;
+        });
+      }
 
-        // Both players submitted, now comparing
-        if (newBattleData.status === 'comparing' && currentGameState !== 'submittingComparison' && currentGameState !== 'gameOver') {
+      if (newBattleData.status === 'comparing') {
+        setGameState(currentState => {
+          if (currentState !== 'submittingComparison' && currentState !== 'gameOver') {
             return 'submittingComparison';
-        }
-        
-        // If P1, trigger the finalization
-        if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
-            if (player.id === newBattleData.player1.id) { 
-                updateDoc(docSnap.ref, { status: 'comparing' });
-                handleSubmissionFinalization(newBattleData);
-            }
-        }
-        
-        return currentGameState;
-      });
+          }
+          return currentState;
+        });
+      }
+      
+      if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
+          if (player.id === newBattleData.player1.id) { 
+              updateDoc(docSnap.ref, { status: 'comparing' });
+              handleSubmissionFinalization(newBattleData);
+          }
+      }
     });
 
     return () => unsub();
@@ -741,5 +749,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
