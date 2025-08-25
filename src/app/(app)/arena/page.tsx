@@ -151,7 +151,8 @@ export default function ArenaPage() {
              });
              
              if(outcome === 'win') {
-                batch.update(playerRef, { coins: player.coins + (battle.wager * 2 * (1 - COMMISSION_RATE)) });
+                const winnings = Math.floor(battle.wager * 2 * (1 - COMMISSION_RATE));
+                batch.update(playerRef, { coins: player.coins + winnings });
              } else if (outcome === 'draw') {
                 batch.update(playerRef, { coins: player.coins + battle.wager });
              } // no change for loss as coins were already deducted
