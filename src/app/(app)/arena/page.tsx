@@ -406,7 +406,9 @@ export default function ArenaPage() {
     const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       
       if (!docSnap.exists()) {
-        toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
+        setTimeout(() => {
+          toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
+        }, 0);
         resetGameState();
         return;
       }
@@ -419,7 +421,9 @@ export default function ArenaPage() {
             if (currentState === 'searching') {
                 const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty);
                 if (lobby) setTimeRemaining(lobby.baseTime * 60);
-                toast({ title: "Opponent Found!", description: "Your duel is starting now!", className: "bg-green-500 text-white" });
+                setTimeout(() => {
+                  toast({ title: "Opponent Found!", description: "Your duel is starting now!", className: "bg-green-500 text-white" });
+                }, 0);
                 return 'inGame';
             }
             return currentState;
@@ -744,5 +748,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
