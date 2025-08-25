@@ -18,7 +18,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, getDoc, writeBatch } from "firebase/firestore";
+import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, writeBatch } from "firebase/firestore";
 
 
 // Component Imports
@@ -141,21 +141,8 @@ export default function ArenaPage() {
         if (IS_FIREBASE_CONFIGURED) {
              const batch = writeBatch(db);
              const playerRef = doc(db, "players", player.id);
-             
-             const playerSnap = await getDoc(playerRef);
-             if (!playerSnap.exists()) throw new Error("Player not found during game end processing.");
-
-             const currentCoins = playerSnap.data().coins || 0;
-             let newCoins = currentCoins;
-            
-              if (outcome === 'win') {
-                  newCoins += (battle.wager * 2 * (1 - COMMISSION_RATE));
-              } else if (outcome === 'draw') {
-                  newCoins += battle.wager; 
-              }
 
              batch.update(playerRef, {
-                 coins: Math.floor(newCoins),
                  matchesPlayed: finalPlayerStats.matchesPlayed,
                  wins: finalPlayerStats.wins,
                  losses: finalPlayerStats.losses,
@@ -163,6 +150,12 @@ export default function ArenaPage() {
                  unlockedAchievements: finalPlayerStats.unlockedAchievements,
              });
              
+             if(outcome === 'win') {
+                batch.update(playerRef, { coins: player.coins + (battle.wager * 2 * (1 - COMMISSION_RATE)) });
+             } else if (outcome === 'draw') {
+                batch.update(playerRef, { coins: player.coins + battle.wager });
+             } // no change for loss as coins were already deducted
+
              const historyRef = collection(db, 'matchHistory');
              const newHistoryDoc = doc(historyRef); // Create a new doc with a generated ID
              batch.set(newHistoryDoc, {
@@ -239,9 +232,6 @@ export default function ArenaPage() {
 
   const findOrCreateBattle = useCallback(async (lobby: LobbyInfo) => {
     if (!player) return;
-
-    setGameState('searching');
-    setSelectedLobbyName(lobby.name);
 
     try {
         const battlesRef = collection(db, "battles");
@@ -371,7 +361,6 @@ export default function ArenaPage() {
 
   const handleSelectLobby = async (lobbyName: DifficultyLobby) => {
     if (!player) return;
-
     const lobbyInfo = LOBBIES.find(l => l.name === lobbyName);
     if (!lobbyInfo) return;
 
@@ -379,6 +368,9 @@ export default function ArenaPage() {
         toast({ title: "Insufficient Coins", description: `You need ${lobbyInfo.entryFee} coins to enter.`, variant: "destructive", action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction> });
         return;
     }
+    
+    setGameState('searching');
+    setSelectedLobbyName(lobbyName);
 
     if (IS_FIREBASE_CONFIGURED) {
       try {
@@ -398,6 +390,7 @@ export default function ArenaPage() {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
         toast({ title: "Error Entering Lobby", description: `Failed to enter lobby: ${errorMessage}`, variant: "destructive" });
+        resetGameState(true);
       }
     } else {
         startBotMatch(lobbyInfo);
@@ -450,8 +443,8 @@ export default function ArenaPage() {
       
       if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
           if (player.id === newBattleData.player1.id) { 
-              updateDoc(docSnap.ref, { status: 'comparing' });
-              handleSubmissionFinalization(newBattleData);
+              await updateDoc(docSnap.ref, { status: 'comparing' });
+              await handleSubmissionFinalization(newBattleData);
           }
       }
     });
