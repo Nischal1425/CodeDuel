@@ -163,8 +163,9 @@ export default function ArenaPage() {
                  unlockedAchievements: finalPlayerStats.unlockedAchievements,
              });
              
-             const historyRef = doc(collection(db, 'matchHistory'));
-             batch.set(historyRef, {
+             const historyRef = collection(db, 'matchHistory');
+             const newHistoryDoc = doc(historyRef); // Create a new doc with a generated ID
+             batch.set(newHistoryDoc, {
                 ...newMatchHistoryEntry,
                 playerId: player.id
              });
@@ -243,26 +244,27 @@ export default function ArenaPage() {
     setSelectedLobbyName(lobby.name);
 
     try {
+      // 1. Read outside transaction: Query for available battles
       const battlesRef = collection(db, "battles");
       const waitingBattlesQuery = query(
         battlesRef,
         where("difficulty", "==", lobby.name),
         where("status", "==", "waiting"),
-        limit(10)
+        limit(10) // Limit to reduce query cost and processing
       );
-      
       const querySnapshot = await getDocs(waitingBattlesQuery);
       const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
 
-      let finalBattleId: string | null = null;
-
+      // 2. If a battle is found, try to join it atomically
       if (availableBattleDoc) {
         const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
+        let joined = false;
         try {
           await runTransaction(db, async (transaction) => {
             const freshBattleDoc = await transaction.get(battleDocRef);
             if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
-              throw new Error("Battle is no longer available.");
+              // Battle was taken by another player in the meantime
+              return;
             }
 
             const player2Data = {
@@ -279,44 +281,42 @@ export default function ArenaPage() {
               status: 'in-progress',
               startedAt: serverTimestamp(),
             });
+            joined = true;
           });
-          finalBattleId = availableBattleDoc.id;
-          toast({ title: "Opponent Found!", description: `Joined a duel.`, className: "bg-green-500 text-white" });
+
+          if (joined) {
+            setBattleId(availableBattleDoc.id);
+            toast({ title: "Opponent Found!", description: "Joined a duel.", className: "bg-green-500 text-white" });
+            return; // Success, exit function
+          }
         } catch (e) {
-          console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
+           console.warn("Failed to join battle, it was likely taken. Will try creating a new one.", e);
         }
       }
 
-      if (!finalBattleId) {
-        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
-        if (!question.solution) throw new Error("AI failed to provide a valid solution.");
-        
-        const player1Data = {
-          id: player.id,
-          username: player.username,
-          avatarUrl: player.avatarUrl,
-          language: DEFAULT_LANGUAGE,
-          code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
-          hasSubmitted: false,
-        };
+      // 3. If no battle was joined (either not found, or join failed), create a new one.
+      const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+      if (!question.solution) throw new Error("AI failed to provide a valid solution.");
+      
+      const player1Data = {
+        id: player.id,
+        username: player.username,
+        avatarUrl: player.avatarUrl,
+        language: DEFAULT_LANGUAGE,
+        code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
+        hasSubmitted: false,
+      };
 
-        const newBattleRef = await addDoc(collection(db, "battles"), {
-          player1: player1Data,
-          status: 'waiting',
-          difficulty: lobby.name,
-          wager: lobby.entryFee,
-          question,
-          createdAt: serverTimestamp(),
-        });
-        finalBattleId = newBattleRef.id;
-        toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
-      }
-
-      if (finalBattleId) {
-        setBattleId(finalBattleId);
-      } else {
-        throw new Error("Matchmaking failed to produce a valid battle ID.");
-      }
+      const newBattleRef = await addDoc(collection(db, "battles"), {
+        player1: player1Data,
+        status: 'waiting',
+        difficulty: lobby.name,
+        wager: lobby.entryFee,
+        question,
+        createdAt: serverTimestamp(),
+      });
+      setBattleId(newBattleRef.id);
+      toast({ title: "Lobby Created", description: "Waiting for an opponent to join your duel." });
 
     } catch (error) {
       console.error("Matchmaking error:", error);
@@ -432,9 +432,8 @@ export default function ArenaPage() {
         setGameState(currentState => {
             if (currentState === 'searching') {
                 setTimeRemaining(LOBBIES.find(l => l.name === newBattleData.difficulty)!.baseTime * 60);
-                return 'inGame';
             }
-            return currentState;
+            return 'inGame';
         });
       }
       
@@ -601,7 +600,6 @@ export default function ArenaPage() {
 
   useEffect(() => {
     if (battleData?.question && language) {
-      const me = battleData?.player1.id === player?.id ? battleData?.player1 : battleData?.player2;
       const meInDb = battleData.player1.id === player?.id ? battleData.player1 : battleData.player2;
       
       if (meInDb?.code) {
@@ -620,25 +618,32 @@ export default function ArenaPage() {
   const onLanguageChange = async (newLang: SupportedLanguage) => {
     if (!player || !battleData) return;
     setLanguage(newLang);
-    setCode(getCodePlaceholder(newLang, battleData.question));
+    const newCode = getCodePlaceholder(newLang, battleData.question);
+    setCode(newCode);
 
-    if (IS_FIREBASE_CONFIGURED) {
+    if (IS_FIREBASE_CONFIGURED && battleData.id && battleData.status !== 'waiting') {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
-        if (!battleData.player2 && playerKey === 'player2') return;
+        // Ensure player2 exists before trying to update it.
+        if (playerKey === 'player2' && !battleData.player2) return;
+
         await updateDoc(doc(db, 'battles', battleData.id), {
             [`${playerKey}.language`]: newLang,
-            [`${playerKey}.code`]: getCodePlaceholder(newLang, battleData.question),
+            [`${playerKey}.code`]: newCode,
         });
-    } else {
+    } else if (!IS_FIREBASE_CONFIGURED) {
+        // Handle bot match case
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (!playerKey || !battleData[playerKey]) return;
-        setBattleData({
-            ...battleData,
-            [playerKey]: { 
-                ...battleData[playerKey]!, 
-                language: newLang,
-                code: getCodePlaceholder(newLang, battleData.question)
-            }
+        setBattleData(currentBattle => {
+            if (!currentBattle) return null;
+            return {
+                ...currentBattle,
+                [playerKey]: { 
+                    ...currentBattle[playerKey]!, 
+                    language: newLang,
+                    code: newCode,
+                }
+            };
         });
     }
   }
@@ -749,7 +754,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
 
     
