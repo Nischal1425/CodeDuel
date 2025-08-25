@@ -2,7 +2,7 @@
 "use client";
 
 import type { FormEvent } from 'react';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -17,8 +17,9 @@ import type { Player, MatchHistoryEntry, SupportedLanguage, Battle } from '@/typ
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
-import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, addDoc, doc, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, writeBatch } from "firebase/firestore";
+import { db, rtdb } from '@/lib/firebase';
+import { collection, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction, setDoc, getDoc } from "firebase/firestore";
+import { ref, onValue, remove, set, get, child, goOffline } from "firebase/database";
 
 
 // Component Imports
@@ -29,7 +30,7 @@ import { DuelView } from './_components/DuelView';
 import { GameOverReport } from './_components/GameOverReport';
 
 
-const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!rtdb;
 
 const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
@@ -56,8 +57,30 @@ export default function ArenaPage() {
   
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
+  
+  const battleListenerUnsubscribe = useRef<() => void | undefined>();
+  const queueListenerUnsubscribe = useRef<() => void | undefined>();
+  const playerQueueRef = useRef<any>();
+
+
+  const cleanupListeners = useCallback(() => {
+    if (battleListenerUnsubscribe.current) {
+        battleListenerUnsubscribe.current();
+        battleListenerUnsubscribe.current = undefined;
+    }
+    if (queueListenerUnsubscribe.current) {
+        queueListenerUnsubscribe.current();
+        queueListenerUnsubscribe.current = undefined;
+    }
+    if (playerQueueRef.current) {
+        remove(playerQueueRef.current);
+        playerQueueRef.current = null;
+    }
+    if(rtdb) goOffline(rtdb);
+  }, []);
 
   const resetGameState = useCallback((backToLobbySelection = true) => {
+    cleanupListeners();
     if (backToLobbySelection) {
       setGameState('selectingLobby');
       setSelectedLobbyName(null);
@@ -68,7 +91,7 @@ export default function ArenaPage() {
     setShowLeaveConfirm(false);
     setBattleId(null);
     setBattleData(null);
-  }, []);
+  }, [cleanupListeners]);
 
   const showAchievementToast = useCallback((achievement) => {
     toast({
@@ -158,7 +181,7 @@ export default function ArenaPage() {
              } // no change for loss as coins were already deducted
 
              const historyRef = collection(db, 'matchHistory');
-             const newHistoryDoc = doc(historyRef); // Create a new doc with a generated ID
+             const newHistoryDoc = doc(historyRef); 
              batch.set(newHistoryDoc, {
                 ...newMatchHistoryEntry,
                 playerId: player.id
@@ -173,7 +196,7 @@ export default function ArenaPage() {
     
     toast({ title: toastTitle, description: toastDesc, variant: toastVariant, duration: 7000 });
     achievementResult.newlyUnlocked.forEach(showAchievementToast);
-    setTimeout(() => sessionStorage.removeItem(hasProcessedKey), 5000); // Cleanup session lock
+    setTimeout(() => sessionStorage.removeItem(hasProcessedKey), 5000); 
   }, [player, showAchievementToast, toast]);
 
 
@@ -231,82 +254,84 @@ export default function ArenaPage() {
     }
   }, [player, toast, processGameEnd]);
 
-  const findOrCreateBattle = useCallback(async (lobby: LobbyInfo) => {
-    if (!player) return;
 
-    try {
-        // --- READ PHASE (OUTSIDE TRANSACTION) ---
-        const battlesRef = collection(db, "battles");
-        const waitingBattlesQuery = query(
-            battlesRef,
-            where("difficulty", "==", lobby.name),
-            where("status", "==", "waiting"),
-            limit(10)
-        );
-        const querySnapshot = await getDocs(waitingBattlesQuery);
-        const availableBattleDoc = querySnapshot.docs.find(doc => doc.data().player1.id !== player.id);
+  const findMatch = useCallback(async (lobby: LobbyInfo) => {
+    if (!player || !rtdb) return;
 
-        if (availableBattleDoc) {
-            // --- ATOMIC WRITE PHASE (INSIDE TRANSACTION) ---
-            const battleDocRef = doc(db, 'battles', availableBattleDoc.id);
-            try {
-                await runTransaction(db, async (transaction) => {
-                    const freshBattleDoc = await transaction.get(battleDocRef);
-                    if (!freshBattleDoc.exists() || freshBattleDoc.data().status !== 'waiting') {
-                        throw new Error("Battle is no longer available.");
-                    }
-
-                    const player2Data = {
-                        id: player.id,
-                        username: player.username,
-                        avatarUrl: player.avatarUrl,
-                        language: DEFAULT_LANGUAGE,
-                        code: getCodePlaceholder(DEFAULT_LANGUAGE, freshBattleDoc.data().question),
-                        hasSubmitted: false,
-                    };
-                    transaction.update(battleDocRef, {
-                        player2: player2Data,
-                        status: 'in-progress',
-                        startedAt: serverTimestamp(),
-                    });
-                });
-                setBattleId(availableBattleDoc.id);
-                return; // Successfully joined a battle
-            } catch (e) {
-                console.warn("Failed to join battle, it was likely taken. Will create a new one.", e);
-                // Continue to create a new battle
-            }
+    const queuePath = `matchmakingQueue/${lobby.name}`;
+    const queueRef = ref(rtdb, queuePath);
+    playerQueueRef.current = child(queueRef, player.id);
+    
+    queueListenerUnsubscribe.current = onValue(queueRef, async (snapshot) => {
+        const queue = snapshot.val();
+        if (!queue) { // Queue is empty, add myself.
+            set(playerQueueRef.current, { joinedAt: serverTimestamp(), rank: player.rank });
+            return;
         }
 
-        // --- NO BATTLE FOUND, CREATE A NEW ONE ---
-        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
-        if (!question.solution) throw new Error("AI failed to provide a valid solution.");
+        const playerIds = Object.keys(queue);
+        const opponentId = playerIds.find(id => id !== player.id);
 
-        const player1Data = {
-            id: player.id,
-            username: player.username,
-            avatarUrl: player.avatarUrl,
-            language: DEFAULT_LANGUAGE,
-            code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
-            hasSubmitted: false,
-        };
+        if (opponentId) { // Found an opponent
+            cleanupListeners(); // Stop listening to this queue
+            
+            const newBattleId = [player.id, opponentId].sort().join('_');
+            const battleDocRef = doc(db, 'battles', newBattleId);
 
-        const newBattleRef = await addDoc(collection(db, "battles"), {
-            player1: player1Data,
-            status: 'waiting',
-            difficulty: lobby.name,
-            wager: lobby.entryFee,
-            question,
-            createdAt: serverTimestamp(),
-        });
-        setBattleId(newBattleRef.id);
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const battleDoc = await transaction.get(battleDocRef);
+                    if (battleDoc.exists()) {
+                        return; // Battle already created by the other player
+                    }
 
-    } catch (error) {
-        console.error("Matchmaking error:", error);
-        toast({ title: "Error Creating Match", description: "Could not find or create a match. Please try again.", variant: "destructive" });
+                    const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+                    const opponentDoc = await getDoc(doc(db, 'players', opponentId));
+                    if (!opponentDoc.exists()) throw new Error("Opponent not found");
+                    const opponentData = opponentDoc.data() as Player;
+
+                    const player1Data = {
+                        id: player.id, username: player.username, avatarUrl: player.avatarUrl,
+                        language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
+                    };
+                    const player2Data = {
+                        id: opponentId, username: opponentData.username, avatarUrl: opponentData.avatarUrl,
+                        language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
+                    };
+                    
+                    const newBattle: Battle = {
+                        id: newBattleId,
+                        player1: player1Data,
+                        player2: player2Data,
+                        status: 'in-progress',
+                        difficulty: lobby.name,
+                        wager: lobby.entryFee,
+                        question,
+                        createdAt: serverTimestamp(),
+                        startedAt: serverTimestamp(),
+                    };
+                    transaction.set(battleDocRef, newBattle);
+
+                     // Clean up RTDB queue
+                    const opponentQueueRef = child(queueRef, opponentId);
+                    remove(opponentQueueRef);
+                    remove(playerQueueRef.current);
+                });
+                setBattleId(newBattleId);
+            } catch (error) {
+                console.error("Match creation transaction failed:", error);
+                resetGameState(true);
+            }
+        } else if (!playerIds.includes(player.id)) { // Opponent disappeared, re-add myself
+             set(playerQueueRef.current, { joinedAt: serverTimestamp(), rank: player.rank });
+        }
+    }, (error) => {
+        console.error("RTDB queue listener error:", error);
+        toast({ title: "Matchmaking Error", description: "Lost connection to the queue.", variant: "destructive" });
         resetGameState(true);
-    }
-  }, [player, toast, resetGameState]);
+    });
+
+  }, [player, toast, cleanupListeners, resetGameState]);
 
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
@@ -388,7 +413,7 @@ export default function ArenaPage() {
         });
         
         toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
-        await findOrCreateBattle(lobbyInfo);
+        await findMatch(lobbyInfo);
 
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
@@ -403,7 +428,7 @@ export default function ArenaPage() {
   useEffect(() => {
     if (!battleId || !player || !IS_FIREBASE_CONFIGURED) return;
 
-    const unsub = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
+    battleListenerUnsubscribe.current = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
       
       if (!docSnap.exists()) {
         setTimeout(() => {
@@ -457,7 +482,11 @@ export default function ArenaPage() {
       }
     });
 
-    return () => unsub();
+    return () => {
+      if (battleListenerUnsubscribe.current) {
+        battleListenerUnsubscribe.current();
+      }
+    };
   }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState]);
 
 
@@ -529,32 +558,26 @@ export default function ArenaPage() {
     const currentGameState = gameState; 
     
     if (currentGameState === 'searching' && selectedLobbyName) {
-        if (IS_FIREBASE_CONFIGURED && battleId) {
+        cleanupListeners();
+        if (IS_FIREBASE_CONFIGURED) {
             try {
-                await runTransaction(db, async (transaction) => {
-                    const battleDocRef = doc(db, 'battles', battleId);
-                    const battleDocSnap = await transaction.get(battleDocRef);
-                    if (battleDocSnap.exists() && battleDocSnap.data().player1.id === player.id && !battleDocSnap.data().player2) {
-                        transaction.delete(battleDocRef);
-
-                        const playerRef = doc(db, "players", player.id);
-                        const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
+                const playerRef = doc(db, "players", player.id);
+                const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
+                if (lobby) {
+                    await runTransaction(db, async (transaction) => {
                         const playerSnap = await transaction.get(playerRef);
-                         if (playerSnap.exists() && lobby) {
+                        if (playerSnap.exists()) {
                             const currentCoins = playerSnap.data().coins || 0;
                             transaction.update(playerRef, { coins: currentCoins + lobby.entryFee });
                         }
-                    }
-                });
+                    });
+                }
                 toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
             } catch (error) {
-                console.error("Error cancelling search:", error);
-            } finally {
-                resetGameState(true);
+                 console.error("Error refunding entry fee:", error);
             }
-        } else {
-             resetGameState(true);
         }
+        resetGameState(true);
     } 
     else if (currentGameState === 'inGame' && battleData) {
         if (IS_FIREBASE_CONFIGURED) {
@@ -608,6 +631,11 @@ export default function ArenaPage() {
     }
   }, [language, battleData, player]);
 
+  // Make sure to clean up any listeners on component unmount
+  useEffect(() => {
+    return () => cleanupListeners();
+  }, [cleanupListeners]);
+
 
   const onLanguageChange = async (newLang: SupportedLanguage) => {
     if (!player || !battleData) return;
@@ -617,7 +645,6 @@ export default function ArenaPage() {
 
     if (IS_FIREBASE_CONFIGURED && battleData.id && battleData.status !== 'waiting') {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
-        // Ensure player2 exists before trying to update it.
         if (playerKey === 'player2' && !battleData.player2) return;
 
         await updateDoc(doc(db, 'battles', battleData.id), {
@@ -748,9 +775,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
-
-    

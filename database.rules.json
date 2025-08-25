@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "matchmakingQueue": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}
