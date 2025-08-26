@@ -38,9 +38,14 @@ export default function HistoryPage() {
     const fetchHistory = async () => {
       try {
         const historyCollection = collection(db, 'matchHistory');
-        const q = query(historyCollection, where("playerId", "==", player.id), orderBy("date", "desc"));
+        // The query now only filters by player, avoiding the composite index.
+        const q = query(historyCollection, where("playerId", "==", player.id));
         const querySnapshot = await getDocs(q);
         const history = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchHistoryEntry));
+        
+        // We sort the results on the client side after fetching.
+        history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
         setMatchHistory(history);
       } catch (error) {
         console.error("Error fetching match history:", error);
