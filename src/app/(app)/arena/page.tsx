@@ -291,7 +291,7 @@ export default function ArenaPage() {
         // We defer battle creation to an async function to not block the transaction.
         (async () => {
           try {
-            const newBattleId = [player.id, opponentId].sort().join('_');
+            const newBattleId = [player.id, opponentId].sort().join('_') + `_${Date.now()}`;
             const battleDocRef = doc(db, 'battles', newBattleId);
 
             const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
@@ -787,6 +787,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
