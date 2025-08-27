@@ -684,14 +684,8 @@ export default function ArenaPage() {
     }
   }
   
-  const handleFindNewMatch = (lobbyName: DifficultyLobby) => {
-    const lobbyInfo = LOBBIES.find(l => l.name === lobbyName);
-    if (!lobbyInfo) {
-      resetGameState(true);
-      return;
-    }
-    resetGameState(false); // Reset without going to lobby selection
-    handleSelectLobby(lobbyName);
+  const handleFindNewMatch = () => {
+    resetGameState(true);
   };
 
 
@@ -752,7 +746,7 @@ export default function ArenaPage() {
                 <GameOverReport
                     battleData={battleData}
                     player={player}
-                    onFindNewMatch={() => handleFindNewMatch(battleData.difficulty)}
+                    onFindNewMatch={handleFindNewMatch}
                 />
             );
         default:

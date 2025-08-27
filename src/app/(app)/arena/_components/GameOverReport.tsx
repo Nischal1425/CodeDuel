@@ -13,12 +13,11 @@ import { AlertTriangle, CheckCircle, Swords, Flag, Brain, Coins, FileCode, XCirc
 import type { Player, Battle } from '@/types';
 import { CodeEditor } from './CodeEditor';
 import { cn } from '@/lib/utils';
-import type { DifficultyLobby } from './LobbySelection';
 
 interface GameOverReportProps {
     battleData: Battle;
     player: Player;
-    onFindNewMatch: (difficulty: DifficultyLobby) => void;
+    onFindNewMatch: () => void;
 }
 
 export function GameOverReport({ battleData, player, onFindNewMatch }: GameOverReportProps) {
@@ -125,7 +124,7 @@ export function GameOverReport({ battleData, player, onFindNewMatch }: GameOverR
             <Button asChild variant="outline" className="w-full">
                 <Link href="/dashboard">Return to Dashboard</Link>
             </Button>
-            <Button onClick={() => onFindNewMatch(battleData.difficulty)} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+            <Button onClick={onFindNewMatch} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
                 Find New Match
             </Button>
             </div>
