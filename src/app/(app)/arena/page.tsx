@@ -59,8 +59,8 @@ export default function ArenaPage() {
   const [battleData, setBattleData] = useState<Battle | null>(null);
   
   const battleListenerUnsubscribe = useRef<() => void | undefined>();
-  const queueListenerUnsubscribe = useRef<() => void | undefined>();
   const playerQueueRef = useRef<any>();
+  const playerBattleListenerUnsubscribe = useRef<() => void | undefined>();
 
 
   const cleanupListeners = useCallback(() => {
@@ -68,16 +68,19 @@ export default function ArenaPage() {
         battleListenerUnsubscribe.current();
         battleListenerUnsubscribe.current = undefined;
     }
-    if (queueListenerUnsubscribe.current) {
-        queueListenerUnsubscribe.current();
-        queueListenerUnsubscribe.current = undefined;
-    }
     if (playerQueueRef.current) {
         remove(playerQueueRef.current);
         playerQueueRef.current = null;
     }
-    if(rtdb) goOffline(rtdb);
-  }, []);
+    if (playerBattleListenerUnsubscribe.current) {
+        playerBattleListenerUnsubscribe.current();
+        playerBattleListenerUnsubscribe.current = undefined;
+    }
+    if (rtdb) {
+        if(player?.id) remove(ref(rtdb, `playerBattles/${player.id}`));
+        goOffline(rtdb);
+    }
+  }, [player?.id]);
 
   const resetGameState = useCallback((backToLobbySelection = true) => {
     cleanupListeners();
@@ -258,27 +261,34 @@ export default function ArenaPage() {
   const findMatch = useCallback(async (lobby: LobbyInfo) => {
     if (!player || !rtdb) return;
 
-    const queuePath = `matchmakingQueue/${lobby.name}`;
-    const queueRef = ref(rtdb, queuePath);
-    playerQueueRef.current = child(queueRef, player.id);
-
     goOnline(rtdb);
 
-    rtdbRunTransaction(queueRef, (queue) => {
+    playerQueueRef.current = ref(rtdb, `matchmakingQueue/${lobby.name}`);
+    
+    const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
+    playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
+        const newBattleId = snapshot.val();
+        if (newBattleId) {
+            setBattleId(newBattleId);
+            remove(playerBattleRef); // Clean up the temporary node
+            if (playerQueueRef.current) {
+                remove(child(playerQueueRef.current, player.id));
+            }
+        }
+    });
+
+    rtdbRunTransaction(playerQueueRef.current, (queue) => {
       if (queue === null) {
-        // Queue is empty, add myself
         return { [player.id]: { joinedAt: rtdbServerTimestamp(), rank: player.rank } };
       }
 
       const opponentId = Object.keys(queue).find(id => id !== player.id);
       
       if (opponentId) {
-        // Found opponent, remove both from queue
-        delete queue[opponentId];
-        delete queue[player.id];
+        delete queue[opponentId]; // Remove opponent from queue
         
-        // Start match creation process in a separate async function
-        // to avoid holding up the transaction.
+        // This transaction will be initiated by the second player to join.
+        // We defer battle creation to an async function to not block the transaction.
         (async () => {
           try {
             const newBattleId = [player.id, opponentId].sort().join('_');
@@ -286,7 +296,8 @@ export default function ArenaPage() {
 
             const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
             const opponentDoc = await getDoc(doc(db, 'players', opponentId));
-            if (!opponentDoc.exists()) throw new Error("Opponent not found");
+            if (!opponentDoc.exists()) throw new Error("Opponent data not found in Firestore.");
+            
             const opponentData = opponentDoc.data() as Player;
 
             const player1Data = {
@@ -300,8 +311,8 @@ export default function ArenaPage() {
             
             const newBattle: Battle = {
               id: newBattleId,
-              player1: player1Data,
-              player2: player2Data,
+              player1: player.id < opponentId ? player1Data : player2Data,
+              player2: player.id < opponentId ? player2Data : player1Data,
               status: 'in-progress',
               difficulty: lobby.name,
               wager: lobby.entryFee,
@@ -311,44 +322,27 @@ export default function ArenaPage() {
             };
 
             await setDoc(battleDocRef, newBattle);
-            setBattleId(newBattleId);
+            
+            // Notify both players of the battle ID
+            await set(ref(rtdb, `playerBattles/${player.id}`), newBattleId);
+            await set(ref(rtdb, `playerBattles/${opponentId}`), newBattleId);
 
           } catch (e) {
-            console.error("Failed to create Firestore battle doc", e);
-            toast({ title: "Match Creation Error", description: "Could not create the match room.", variant: "destructive" });
+            console.error("Failed to create battle:", e);
+            toast({ title: "Match Creation Error", description: "Could not create the match.", variant: "destructive" });
             resetGameState(true);
           }
         })();
 
-        return queue; // Return modified queue
+        return queue;
       } else {
-        // No opponent, add myself to queue
-        queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+        if (!queue[player.id]) {
+            queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+        }
         return queue;
       }
     });
-
-    // Listen for the battle document to be created
-    queueListenerUnsubscribe.current = onValue(playerQueueRef.current, (snapshot) => {
-      // If our node in the queue is removed, it means we've been matched.
-      // We don't need to do anything here because the battle listener will pick it up.
-      // But if we are still here after a while, we might want a timeout.
-      if (snapshot.val() === null) {
-          if (queueListenerUnsubscribe.current) {
-            queueListenerUnsubscribe.current();
-          }
-          const possibleBattleId1 = [player.id, ''].sort().join('_').split('_')[1] ? [player.id, ''].sort().join('_') : null;
-          const possibleBattleId2 = ['', player.id].sort().join('_').split('_')[1] ? ['', player.id].sort().join('_') : null;
-          
-          if(battleId) return;
-
-          // A bit of a hacky way to find the opponent, as we don't know who it is.
-          // This part could be improved by passing opponentId from the transaction if possible
-          // For now, we will rely on the battle listener to pick up the match.
-      }
-    });
-
-  }, [player, toast, resetGameState, battleId]);
+  }, [player, toast, resetGameState]);
 
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
@@ -450,7 +444,7 @@ export default function ArenaPage() {
     battleListenerUnsubscribe.current = onSnapshot(newBattleDocRef, async (docSnap) => {
       
       if (!docSnap.exists()) {
-         if (gameState !== 'searching') { // Only show toast if we were already in-game
+         if (gameState !== 'searching' && gameState !== 'selectingLobby') { 
              setTimeout(() => {
                toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
              }, 0);
