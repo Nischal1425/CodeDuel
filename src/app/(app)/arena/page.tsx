@@ -263,8 +263,9 @@ export default function ArenaPage() {
 
     goOnline(rtdb);
 
-    playerQueueRef.current = ref(rtdb, `matchmakingQueue/${lobby.name}`);
-    
+    const lobbyQueueRef = ref(rtdb, `matchmakingQueue/${lobby.name}`);
+    playerQueueRef.current = child(lobbyQueueRef, player.id);
+
     const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
     playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
         const newBattleId = snapshot.val();
@@ -272,23 +273,24 @@ export default function ArenaPage() {
             setBattleId(newBattleId);
             remove(playerBattleRef); // Clean up the temporary node
             if (playerQueueRef.current) {
-                remove(child(playerQueueRef.current, player.id));
+                remove(playerQueueRef.current);
             }
         }
     });
 
-    rtdbRunTransaction(playerQueueRef.current, (queue) => {
+    rtdbRunTransaction(lobbyQueueRef, (queue) => {
       if (queue === null) {
-        return { [player.id]: { joinedAt: rtdbServerTimestamp(), rank: player.rank } };
+        const newQueue = {};
+        newQueue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+        return newQueue;
       }
 
       const opponentId = Object.keys(queue).find(id => id !== player.id);
       
       if (opponentId) {
-        delete queue[opponentId]; // Remove opponent from queue
+        // Opponent found, remove them from the queue
+        delete queue[opponentId];
         
-        // This transaction will be initiated by the second player to join.
-        // We defer battle creation to an async function to not block the transaction.
         (async () => {
           try {
             const newBattleId = [player.id, opponentId].sort().join('_') + `_${Date.now()}`;
@@ -334,8 +336,9 @@ export default function ArenaPage() {
           }
         })();
 
-        return queue;
+        return queue; // Return queue with opponent removed
       } else {
+        // No opponent found, add current player to the queue
         if (!queue[player.id]) {
             queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
         }
@@ -545,14 +548,14 @@ export default function ArenaPage() {
     if (!battleData || !player || battleData.status !== 'in-progress') return;
 
     const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
-    if (!opponent) return; // Should not happen in a valid match
+    if (!opponent) return; 
 
     toast({ title: "Time's Up!", description: "You ran out of time and forfeited the match.", variant: "destructive" });
 
     if (IS_FIREBASE_CONFIGURED) {
         await updateDoc(doc(db, "battles", battleData.id), {
             status: 'forfeited',
-            winnerId: opponent.id // The opponent is the winner
+            winnerId: opponent.id 
         });
     } else {
         const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
@@ -680,6 +683,17 @@ export default function ArenaPage() {
         });
     }
   }
+  
+  const handleFindNewMatch = (lobbyName: DifficultyLobby) => {
+    const lobbyInfo = LOBBIES.find(l => l.name === lobbyName);
+    if (!lobbyInfo) {
+      resetGameState(true);
+      return;
+    }
+    resetGameState(false); // Reset without going to lobby selection
+    handleSelectLobby(lobbyName);
+  };
+
 
   const renderContent = () => {
     switch (gameState) {
@@ -738,7 +752,7 @@ export default function ArenaPage() {
                 <GameOverReport
                     battleData={battleData}
                     player={player}
-                    onFindNewMatch={() => resetGameState(true)}
+                    onFindNewMatch={() => handleFindNewMatch(battleData.difficulty)}
                 />
             );
         default:
@@ -787,6 +801,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
