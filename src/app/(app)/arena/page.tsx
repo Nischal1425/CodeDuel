@@ -543,21 +543,18 @@ export default function ArenaPage() {
 
   const handleTimeUp = async () => {
     if (!battleData || !player || battleData.status !== 'in-progress') return;
-    
+
+    const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
+    if (!opponent) return; // Should not happen in a valid match
+
+    toast({ title: "Time's Up!", description: "You ran out of time and forfeited the match.", variant: "destructive" });
+
     if (IS_FIREBASE_CONFIGURED) {
-        const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
-        if (opponent?.hasSubmitted) {
-            await updateDoc(doc(db, "battles", battleData.id), {
-                status: 'forfeited',
-                winnerId: opponent.id
-            });
-        } else {
-            if(player.id === battleData.player1.id) {
-               await updateDoc(doc(db, "battles", battleData.id), { status: 'completed', winnerId: null });
-            }
-        }
+        await updateDoc(doc(db, "battles", battleData.id), {
+            status: 'forfeited',
+            winnerId: opponent.id // The opponent is the winner
+        });
     } else {
-        toast({ title: "Time's Up!", description: "You ran out of time and lost the duel.", variant: "destructive" });
         const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
         setBattleData(finalBattleState);
         await processGameEnd(finalBattleState);
@@ -790,5 +787,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
