@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db, rtdb } from '@/lib/firebase';
 import { collection, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction, setDoc, getDoc } from "firebase/firestore";
-import { ref, onValue, remove, set, get, child, goOffline } from "firebase/database";
+import { ref, onValue, remove, set, get, child, goOffline, goOnline, serverTimestamp as rtdbServerTimestamp, runTransaction as rtdbRunTransaction } from "firebase/database";
 
 
 // Component Imports
@@ -261,77 +261,94 @@ export default function ArenaPage() {
     const queuePath = `matchmakingQueue/${lobby.name}`;
     const queueRef = ref(rtdb, queuePath);
     playerQueueRef.current = child(queueRef, player.id);
-    
-    queueListenerUnsubscribe.current = onValue(queueRef, async (snapshot) => {
-        const queue = snapshot.val();
-        if (!queue) { // Queue is empty, add myself.
-            set(playerQueueRef.current, { joinedAt: serverTimestamp(), rank: player.rank });
-            return;
-        }
 
-        const playerIds = Object.keys(queue);
-        const opponentId = playerIds.find(id => id !== player.id);
+    goOnline(rtdb);
 
-        if (opponentId) { // Found an opponent
-            cleanupListeners(); // Stop listening to this queue
-            
+    rtdbRunTransaction(queueRef, (queue) => {
+      if (queue === null) {
+        // Queue is empty, add myself
+        return { [player.id]: { joinedAt: rtdbServerTimestamp(), rank: player.rank } };
+      }
+
+      const opponentId = Object.keys(queue).find(id => id !== player.id);
+      
+      if (opponentId) {
+        // Found opponent, remove both from queue
+        delete queue[opponentId];
+        delete queue[player.id];
+        
+        // Start match creation process in a separate async function
+        // to avoid holding up the transaction.
+        (async () => {
+          try {
             const newBattleId = [player.id, opponentId].sort().join('_');
             const battleDocRef = doc(db, 'battles', newBattleId);
 
-            try {
-                await runTransaction(db, async (transaction) => {
-                    const battleDoc = await transaction.get(battleDocRef);
-                    if (battleDoc.exists()) {
-                        return; // Battle already created by the other player
-                    }
+            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+            const opponentDoc = await getDoc(doc(db, 'players', opponentId));
+            if (!opponentDoc.exists()) throw new Error("Opponent not found");
+            const opponentData = opponentDoc.data() as Player;
 
-                    const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
-                    const opponentDoc = await getDoc(doc(db, 'players', opponentId));
-                    if (!opponentDoc.exists()) throw new Error("Opponent not found");
-                    const opponentData = opponentDoc.data() as Player;
+            const player1Data = {
+              id: player.id, username: player.username, avatarUrl: player.avatarUrl,
+              language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
+            };
+            const player2Data = {
+              id: opponentId, username: opponentData.username, avatarUrl: opponentData.avatarUrl,
+              language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
+            };
+            
+            const newBattle: Battle = {
+              id: newBattleId,
+              player1: player1Data,
+              player2: player2Data,
+              status: 'in-progress',
+              difficulty: lobby.name,
+              wager: lobby.entryFee,
+              question,
+              createdAt: serverTimestamp(),
+              startedAt: serverTimestamp(),
+            };
 
-                    const player1Data = {
-                        id: player.id, username: player.username, avatarUrl: player.avatarUrl,
-                        language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
-                    };
-                    const player2Data = {
-                        id: opponentId, username: opponentData.username, avatarUrl: opponentData.avatarUrl,
-                        language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
-                    };
-                    
-                    const newBattle: Battle = {
-                        id: newBattleId,
-                        player1: player1Data,
-                        player2: player2Data,
-                        status: 'in-progress',
-                        difficulty: lobby.name,
-                        wager: lobby.entryFee,
-                        question,
-                        createdAt: serverTimestamp(),
-                        startedAt: serverTimestamp(),
-                    };
-                    transaction.set(battleDocRef, newBattle);
+            await setDoc(battleDocRef, newBattle);
+            setBattleId(newBattleId);
 
-                     // Clean up RTDB queue
-                    const opponentQueueRef = child(queueRef, opponentId);
-                    remove(opponentQueueRef);
-                    remove(playerQueueRef.current);
-                });
-                setBattleId(newBattleId);
-            } catch (error) {
-                console.error("Match creation transaction failed:", error);
-                resetGameState(true);
-            }
-        } else if (!playerIds.includes(player.id)) { // Opponent disappeared, re-add myself
-             set(playerQueueRef.current, { joinedAt: serverTimestamp(), rank: player.rank });
-        }
-    }, (error) => {
-        console.error("RTDB queue listener error:", error);
-        toast({ title: "Matchmaking Error", description: "Lost connection to the queue.", variant: "destructive" });
-        resetGameState(true);
+          } catch (e) {
+            console.error("Failed to create Firestore battle doc", e);
+            toast({ title: "Match Creation Error", description: "Could not create the match room.", variant: "destructive" });
+            resetGameState(true);
+          }
+        })();
+
+        return queue; // Return modified queue
+      } else {
+        // No opponent, add myself to queue
+        queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+        return queue;
+      }
     });
 
-  }, [player, toast, cleanupListeners, resetGameState]);
+    // Listen for the battle document to be created
+    queueListenerUnsubscribe.current = onValue(playerQueueRef.current, (snapshot) => {
+      // If our node in the queue is removed, it means we've been matched.
+      // We don't need to do anything here because the battle listener will pick it up.
+      // But if we are still here after a while, we might want a timeout.
+      if (snapshot.val() === null) {
+          if (queueListenerUnsubscribe.current) {
+            queueListenerUnsubscribe.current();
+          }
+          const possibleBattleId1 = [player.id, ''].sort().join('_').split('_')[1] ? [player.id, ''].sort().join('_') : null;
+          const possibleBattleId2 = ['', player.id].sort().join('_').split('_')[1] ? ['', player.id].sort().join('_') : null;
+          
+          if(battleId) return;
+
+          // A bit of a hacky way to find the opponent, as we don't know who it is.
+          // This part could be improved by passing opponentId from the transaction if possible
+          // For now, we will rely on the battle listener to pick up the match.
+      }
+    });
+
+  }, [player, toast, resetGameState, battleId]);
 
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
@@ -428,13 +445,17 @@ export default function ArenaPage() {
   useEffect(() => {
     if (!battleId || !player || !IS_FIREBASE_CONFIGURED) return;
 
-    battleListenerUnsubscribe.current = onSnapshot(doc(db, "battles", battleId), async (docSnap) => {
+    const newBattleDocRef = doc(db, "battles", battleId);
+
+    battleListenerUnsubscribe.current = onSnapshot(newBattleDocRef, async (docSnap) => {
       
       if (!docSnap.exists()) {
-        setTimeout(() => {
-          toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
-        }, 0);
-        resetGameState();
+         if (gameState !== 'searching') { // Only show toast if we were already in-game
+             setTimeout(() => {
+               toast({ title: "Match Canceled", description: "The opponent left or the match was removed.", variant: "default" });
+             }, 0);
+             resetGameState();
+         }
         return;
       }
       
@@ -487,7 +508,7 @@ export default function ArenaPage() {
         battleListenerUnsubscribe.current();
       }
     };
-  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState]);
+  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState, gameState]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -775,3 +796,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
