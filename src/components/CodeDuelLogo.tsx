@@ -9,19 +9,17 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="hsl(var(--primary))"
-      strokeWidth="1.5"
+      strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-label="CodeDuelz Logo"
       {...props}
     >
-      <path d="M12 2a5 5 0 0 0-5 5v2.5" />
-      <path d="M17 9.5V7a5 5 0 0 0-10 0v2.5" />
-      <path d="M12 22V12" />
-      <path d="M9 12H7.5a4.5 4.5 0 1 1 0-9" />
-      <path d="M15 12h1.5a4.5 4.5 0 1 0 0-9" />
-      <path d="M9 16l-4-4" />
-      <path d="M15 16l4-4" />
+      <path d="m14.5 3.5-4 4L2 16l.5 3.5L4 21l3.5-1.5L16 11l4-4 .5-3.5L21 4l-3.5-.5Z" />
+      <path d="m18 7 1-1" />
+      <path d="m2 16 2.5 2.5" />
+      <path d="m14.5 3.5 4.5 4.5" />
+      <path d="m10 8 4.5 4.5" />
     </svg>
   );
 }
