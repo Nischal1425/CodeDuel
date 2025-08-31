@@ -15,8 +15,8 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
       aria-label="CodeDuelz Logo"
       {...props}
     >
-      <path d="M9 6L4 12l5 6" />
-      <path d="M15 6l5 6-5 6" />
+      <path d="M10 9L5 12l5 3" />
+      <path d="M14 9l5 3-5 3" />
     </svg>
   );
 }
