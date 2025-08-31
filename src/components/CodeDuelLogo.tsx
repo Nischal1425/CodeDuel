@@ -9,14 +9,14 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       stroke="hsl(var(--primary))"
-      strokeWidth="2"
+      strokeWidth="2.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-label="CodeDuelz Logo"
       {...props}
     >
-      <path d="M10 4L4 12l6 8" />
-      <path d="M14 4l6 8-6 8" />
+      <path d="M9 6L4 12l5 6" />
+      <path d="M15 6l5 6-5 6" />
     </svg>
   );
 }
