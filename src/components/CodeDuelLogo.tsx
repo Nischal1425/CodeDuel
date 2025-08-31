@@ -4,16 +4,19 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 50 50"
+      viewBox="0 0 24 24"
       width="32"
       height="32"
       aria-label="CodeDuelz Logo"
+      fill="none"
+      stroke="hsl(var(--primary))"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       {...props}
     >
-      <rect width="50" height="50" fill="transparent" />
-      <path d="M25 5 L15 15 L15 35 L25 45 L35 35 L35 15 Z" fill="hsl(var(--primary))" />
-      <path d="M20 10 L10 20 L10 30 L20 40 L30 30 L30 20 Z" fill="hsl(var(--background))" />
-      <path d="M25 12 L18 18 L18 32 L25 38 L32 32 L32 18 Z" fill="hsl(var(--primary))" />
+      <path d="M16 18l6-6-6-6" />
+      <path d="M8 6l-6 6 6 6" />
     </svg>
   );
 }
