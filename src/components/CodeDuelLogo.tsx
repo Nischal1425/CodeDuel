@@ -7,7 +7,7 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
       viewBox="0 0 215 50"
       width="180"
       height="42"
-      aria-label="Code Duelz Logo"
+      aria-label="CodeDuelz Logo"
       {...props}
     >
       <rect width="215" height="50" fill="transparent" />
