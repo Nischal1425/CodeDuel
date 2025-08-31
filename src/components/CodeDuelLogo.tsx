@@ -5,8 +5,8 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 215 50"
-      width="160"
-      height="37.5"
+      width="180"
+      height="42"
       aria-label="Code Duelz Logo"
       {...props}
     >
@@ -21,7 +21,7 @@ export function CodeDuelLogo(props: SVGProps<SVGSVGElement>) {
         fontFamily="var(--font-geist-mono), monospace"
         fontSize="28"
         fontWeight="bold"
-        fill="hsl(var(--primary))"
+        fill="hsl(var(--foreground))"
       >
         CodeDuelz
       </text>
