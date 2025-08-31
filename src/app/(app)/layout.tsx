@@ -64,12 +64,13 @@ export default function AuthenticatedAppLayout({
       <SidebarProvider defaultOpen={true}>
         <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r">
           <SidebarHeader className="p-4 items-center justify-center">
-              <div className="group-data-[collapsible=icon]:hidden">
+            <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
+                <CodeDuelLogo />
+                <h1 className="text-xl font-semibold font-mono">CodeDuelz</h1>
+            </div>
+            <div className="hidden group-data-[collapsible=icon]:block">
               <CodeDuelLogo />
-              </div>
-              <div className="hidden group-data-[collapsible=icon]:block">
-                <SwordsIcon className="h-8 w-8 text-primary" />
-              </div>
+            </div>
           </SidebarHeader>
           <UserDisplay />
           <SidebarContent className="p-2 flex-grow">

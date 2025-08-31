@@ -101,7 +101,10 @@ export default function LandingPage() {
     <div className="flex flex-col min-h-screen bg-gradient-to-br from-background to-secondary/30">
       <header className="py-6 px-4 sm:px-6 lg:px-8 shadow-sm sticky top-0 bg-background/80 backdrop-blur-sm z-50">
         <div className="container mx-auto flex justify-between items-center">
-          <CodeDuelLogo />
+          <div className="flex items-center gap-2">
+            <CodeDuelLogo />
+            <h1 className="text-xl font-semibold font-mono text-foreground">CodeDuelz</h1>
+          </div>
           <Button variant="ghost" onClick={() => document.getElementById('login-section')?.scrollIntoView({ behavior: 'smooth' })}>
             Login / Sign Up
           </Button>
