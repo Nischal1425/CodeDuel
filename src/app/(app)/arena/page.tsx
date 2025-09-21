@@ -305,9 +305,11 @@ export default function ArenaPage() {
     toast({ title: toastTitle, description: toastDesc, variant: toastVariant, duration: 7000 });
     achievementResult.newlyUnlocked.forEach(showAchievementToast);
     
+    // Set game state to gameOver instead of resetting, to show the report screen
+    setGameState('gameOver');
+
     setTimeout(() => {
         sessionStorage.removeItem(hasProcessedKey);
-        resetGameState(true);
     }, 3000);
  }, [player, toast, showAchievementToast, resetGameState]);
 
@@ -1158,7 +1160,7 @@ export default function ArenaPage() {
                 </div>
             );
         case 'gameOver':
-            if (!battleData || !player) {
+            if ((!battleData && !teamBattleData) || !player) {
                 return (
                     <div className="flex flex-col items-center justify-center h-full text-center p-4">
                         <p className="mb-4">Match data not found.</p>
@@ -1168,7 +1170,8 @@ export default function ArenaPage() {
             }
             return (
                 <GameOverReport
-                    battleData={battleData}
+                    battleData={battleData!}
+                    teamBattleData={teamBattleData}
                     player={player}
                     onFindNewMatch={handleFindNewMatch}
                 />
@@ -1225,3 +1228,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
