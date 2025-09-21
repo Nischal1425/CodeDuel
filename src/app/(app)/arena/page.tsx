@@ -12,6 +12,7 @@ import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-c
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
+import { evaluateCodeSubmission } from '@/ai/flows/evaluate-code-submission';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
 import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamLobbyPlayer } from '@/types';
@@ -19,7 +20,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db, rtdb } from '@/lib/firebase';
-import { collection, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction, setDoc, getDoc } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction, setDoc, getDoc, increment } from "firebase/firestore";
 import { ref, onValue, remove, set, get, child, goOffline, goOnline, serverTimestamp as rtdbServerTimestamp, runTransaction as rtdbRunTransaction } from "firebase/database";
 
 
@@ -37,6 +38,7 @@ const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!r
 
 const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
+const TEAM_SUBMISSION_POINTS = 100; // Points for a correct team submission
 
 type GameState = 'selectingLobby' | 'searching' | 'formingTeam' | 'inGame' | 'inTeamGame' | 'submittingComparison' | 'gameOver';
 
@@ -93,6 +95,7 @@ export default function ArenaPage() {
      if (teamLobbyListenerUnsubscribe.current) {
         teamLobbyListenerUnsubscribe.current();
         teamLobbyListenerUnsubscribe.current = undefined;
+        if(teamLobbyRef.current) remove(teamLobbyRef.current);
         teamLobbyRef.current = null;
     }
      if (teamBattleListenerUnsubscribe.current) {
@@ -531,6 +534,7 @@ export default function ArenaPage() {
         setTimeout(() => {
             if (teamLobbyRef.current) {
                 remove(teamLobbyRef.current);
+                teamLobbyRef.current = null;
             }
         }, 5000);
 
@@ -756,9 +760,35 @@ export default function ArenaPage() {
             await handleSubmissionFinalization(finalBattleState);
         }
     } else if (gameState === 'inTeamGame' && teamBattleData) {
-        // Logic for submitting code in a team game
-        toast({ title: "Code Submitted!", description: "Your solution is locked in for the team battle.", className: "bg-primary text-primary-foreground" });
-        // This will be more complex, involving updating a player's status within the TeamBattle doc
+        try {
+            const evalResult = await evaluateCodeSubmission({
+                playerCode: code,
+                language: language,
+                problemStatement: teamBattleData.question.problemStatement,
+                referenceSolution: teamBattleData.question.solution,
+                difficulty: teamBattleData.difficulty,
+            });
+
+            if (evalResult.isPotentiallyCorrect) {
+                toast({ title: "Correct Submission!", description: `Your team gains ${TEAM_SUBMISSION_POINTS} points!`, className: "bg-green-500 text-white" });
+
+                if (IS_FIREBASE_CONFIGURED) {
+                    const teamBattleRef = doc(db, 'teamBattles', teamBattleData.id);
+                    const playerIsOnTeam1 = teamBattleData.team1.some(p => p.id === player.id);
+                    const scoreField = playerIsOnTeam1 ? 'team1Score' : 'team2Score';
+                    
+                    await updateDoc(teamBattleRef, {
+                        [scoreField]: increment(TEAM_SUBMISSION_POINTS)
+                    });
+                }
+                // TODO: Disable further submissions from this player to prevent spamming points.
+            } else {
+                toast({ title: "Incorrect Solution", description: "Your code didn't pass the evaluation. Try again!", variant: "destructive" });
+            }
+        } catch (error) {
+            console.error("Error evaluating team submission:", error);
+            toast({ title: "Evaluation Error", description: "Could not evaluate your code. Please try again.", variant: "destructive" });
+        }
     }
   };
 
@@ -1106,5 +1136,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
 
 
 
+
+    
 
     
