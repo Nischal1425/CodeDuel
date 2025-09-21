@@ -1,38 +1,40 @@
-
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /players/{userId} {
-      // Allow a user to get their own document
-      allow get: if request.auth.uid == userId;
-      
-      // Allow any authenticated user to list players for leaderboard, but not get individual documents
-      allow list: if request.auth != null;
-
-      // Allow a user to update their own document
-      allow update: if request.auth.uid == userId;
-      
-      // Allow any authenticated user to create a player document (sign-up)
-      allow create: if request.auth != null;
-    }
-
-    match /battles/{battleId} {
-      // Allow create if the user is authenticated
-      allow create: if request.auth != null;
-      
-      // Allow read/write only to players involved in the battle
-      allow read, update, delete: if request.auth != null && (
-        resource.data.player1.id == request.auth.uid || 
-        (resource.data.player2 != null && resource.data.player2.id == request.auth.uid)
-      );
-    }
-
-    match /matchHistory/{historyId} {
-      // Allow users to create their own history entries
-      allow create: if request.auth != null && request.resource.data.playerId == request.auth.uid;
-      
-      // Allow users to read only their own match history via a query
-      allow list, get: if request.auth != null && request.auth.uid == resource.data.playerId;
+{
+  "rules": {
+    "databases": {
+      "{database}": {
+        "documents": {
+          "players": {
+            // Any authenticated user can list players for the leaderboard
+            "allow": ["list"],
+            "if": "request.auth != null"
+          },
+          "players/{userId}": {
+            // A user can create their own player document
+            // A user can only get, update their own document. No one else can.
+            "allow": ["get", "update"],
+            "if": "request.auth.uid == userId"
+          },
+          "battles/{battleId}": {
+            "allow": ["create"],
+            "if": "request.auth.uid != null"
+          },
+          "battles/{battleId}": {
+            // Only players in the battle can read or update it
+            "allow": ["read", "update"],
+            "if": "request.auth.uid == resource.data.player1.id || request.auth.uid == resource.data.player2.id"
+          },
+          "matchHistory/{historyId}": {
+            // A user can create their own match history entry
+            "allow": ["create"],
+            "if": "request.auth.uid != null && request.auth.uid == request.resource.data.playerId"
+          },
+          "matchHistory": {
+            // A user can only list their own match history
+            "allow": ["list"],
+_           "if": "request.auth != null && request.query.filters[0].value == request.auth.uid"
+          }
+        }
+      }
     }
   }
 }
