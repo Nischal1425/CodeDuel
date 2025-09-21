@@ -516,9 +516,11 @@ export default function ArenaPage() {
     if (me?.hasSubmitted) return;
 
     toast({ title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground" });
+    
+    // Determine which player key to use ('player1' or 'player2')
+    const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
 
     if (IS_FIREBASE_CONFIGURED) {
-        const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         const updatePayload = {
             [`${playerKey}.code`]: code,
             [`${playerKey}.language`]: language,
@@ -526,21 +528,27 @@ export default function ArenaPage() {
         };
         await updateDoc(doc(db, "battles", battleData.id), updatePayload);
     } else {
-        const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (!playerKey || !battleData[playerKey]) return;
 
-        const updatedBattle = {
+        // Create a definitive, final battle state with the latest code for submission
+        const finalBattleState: Battle = {
             ...battleData,
             [playerKey]: {
                 ...battleData[playerKey]!,
                 code: code,
                 language: language,
                 hasSubmitted: true,
+            },
+            // Also ensure the opponent's data is up-to-date
+            player2: {
+              ...battleData.player2!,
+              hasSubmitted: true, // In bot matches, the bot has always submitted
             }
         };
-        setBattleData(updatedBattle);
+
+        setBattleData(finalBattleState); // Update local state immediately
         setGameState('submittingComparison');
-        await handleSubmissionFinalization(updatedBattle);
+        await handleSubmissionFinalization(finalBattleState);
     }
   };
 
@@ -803,3 +811,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     
 
     
+
