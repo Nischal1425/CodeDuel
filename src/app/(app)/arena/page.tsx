@@ -29,6 +29,7 @@ import type { DifficultyLobby, LobbyInfo } from './_components/LobbySelection';
 import { SearchingView } from './_components/SearchingView';
 import { TeamFormationLobby } from './_components/TeamFormationLobby';
 import { DuelView } from './_components/DuelView';
+import { TeamBattleView } from './_components/TeamBattleView';
 import { GameOverReport } from './_components/GameOverReport';
 
 
@@ -69,6 +70,7 @@ export default function ArenaPage() {
   const [battleData, setBattleData] = useState<Battle | null>(null);
   const [teamLobbyData, setTeamLobbyData] = useState<TeamLobby | null>(null);
   const [teamBattleId, setTeamBattleId] = useState<string | null>(null);
+  const [teamBattleData, setTeamBattleData] = useState<TeamBattle | null>(null);
 
   
   const battleListenerUnsubscribe = useRef<() => void | undefined>();
@@ -76,6 +78,7 @@ export default function ArenaPage() {
   const playerBattleListenerUnsubscribe = useRef<() => void | undefined>();
   const teamLobbyRef = useRef<any>();
   const teamLobbyListenerUnsubscribe = useRef<() => void | undefined>();
+  const teamBattleListenerUnsubscribe = useRef<() => void | undefined>();
 
 
   const cleanupListeners = useCallback(() => {
@@ -91,6 +94,10 @@ export default function ArenaPage() {
         teamLobbyListenerUnsubscribe.current();
         teamLobbyListenerUnsubscribe.current = undefined;
         teamLobbyRef.current = null;
+    }
+     if (teamBattleListenerUnsubscribe.current) {
+        teamBattleListenerUnsubscribe.current();
+        teamBattleListenerUnsubscribe.current = undefined;
     }
     if (playerBattleListenerUnsubscribe.current) {
         playerBattleListenerUnsubscribe.current();
@@ -116,6 +123,7 @@ export default function ArenaPage() {
     setBattleData(null);
     setTeamLobbyData(null);
     setTeamBattleId(null);
+    setTeamBattleData(null);
     hasInitializedCode.current = false;
   }, [cleanupListeners]);
 
@@ -475,10 +483,10 @@ export default function ArenaPage() {
             }
 
             if (data.battleId) {
+                const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
+                if (lobby) setTimeRemaining(lobby.baseTime * 60);
+
                 setTeamBattleId(data.battleId);
-                // The lobby is now complete, and a battle is starting. 
-                // We can transition to the game screen.
-                // (Further logic will be needed here to load the team battle)
                 toast({ title: 'Match Starting!', description: 'Your team deathmatch is about to begin.' });
                 setGameState('inTeamGame'); 
             }
@@ -487,7 +495,7 @@ export default function ArenaPage() {
              setTeamLobbyData(initialTeamLobbyState);
         }
     });
-  }, [player]);
+  }, [player, selectedLobbyName]);
 
   const startTeamBattle = async (finalLobbyData: TeamLobby) => {
     if (!player || !selectedLobbyName) return;
@@ -679,64 +687,105 @@ export default function ArenaPage() {
   }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState, gameState]);
 
 
+  useEffect(() => {
+    if (!teamBattleId || !player || !IS_FIREBASE_CONFIGURED) return;
+    
+    const teamBattleDocRef = doc(db, 'teamBattles', teamBattleId);
+    
+    teamBattleListenerUnsubscribe.current = onSnapshot(teamBattleDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const data = { id: docSnap.id, ...docSnap.data() } as TeamBattle;
+            setTeamBattleData(data);
+            
+            // Handle game state transitions based on team battle status later
+            // e.g., if (data.status === 'completed') { ... }
+
+        } else {
+             if (gameState !== 'selectingLobby') { 
+                toast({ title: "Team Match Canceled", description: "The team match was removed.", variant: "default" });
+                resetGameState();
+             }
+        }
+    });
+
+    return () => {
+        if (teamBattleListenerUnsubscribe.current) {
+            teamBattleListenerUnsubscribe.current();
+        }
+    }
+  }, [teamBattleId, player, gameState, resetGameState, toast]);
+
+
   const handleSubmitCode = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!code.trim() || !battleData || !player) return;
+    if (!code.trim() || !player) return;
 
-    const me = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
-    if (me?.hasSubmitted) return;
+    if (gameState === 'inGame' && battleData) {
+        const me = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
+        if (me?.hasSubmitted) return;
 
-    toast({ title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground" });
-    
-    const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
+        toast({ title: "Code Submitted!", description: "Your solution is locked in for the 1v1 duel.", className: "bg-primary text-primary-foreground" });
+        
+        const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
 
-    if (IS_FIREBASE_CONFIGURED) {
-        const updatePayload = {
-            [`${playerKey}.code`]: code,
-            [`${playerKey}.language`]: language,
-            [`${playerKey}.hasSubmitted`]: true
-        };
-        await updateDoc(doc(db, "battles", battleData.id), updatePayload);
-    } else {
-        if (!playerKey || !battleData[playerKey]) return;
-        const finalBattleState: Battle = {
-            ...battleData,
-            [playerKey]: {
-                ...battleData[playerKey]!,
-                code: code,
-                language: language,
-                hasSubmitted: true,
-            },
-            player2: {
-              ...battleData.player2!,
-              hasSubmitted: true, 
-            }
-        };
+        if (IS_FIREBASE_CONFIGURED) {
+            const updatePayload = {
+                [`${playerKey}.code`]: code,
+                [`${playerKey}.language`]: language,
+                [`${playerKey}.hasSubmitted`]: true
+            };
+            await updateDoc(doc(db, "battles", battleData.id), updatePayload);
+        } else {
+            if (!playerKey || !battleData[playerKey]) return;
+            const finalBattleState: Battle = {
+                ...battleData,
+                [playerKey]: {
+                    ...battleData[playerKey]!,
+                    code: code,
+                    language: language,
+                    hasSubmitted: true,
+                },
+                player2: {
+                  ...battleData.player2!,
+                  hasSubmitted: true, 
+                }
+            };
 
-        setBattleData(finalBattleState);
-        setGameState('submittingComparison');
-        await handleSubmissionFinalization(finalBattleState);
+            setBattleData(finalBattleState);
+            setGameState('submittingComparison');
+            await handleSubmissionFinalization(finalBattleState);
+        }
+    } else if (gameState === 'inTeamGame' && teamBattleData) {
+        // Logic for submitting code in a team game
+        toast({ title: "Code Submitted!", description: "Your solution is locked in for the team battle.", className: "bg-primary text-primary-foreground" });
+        // This will be more complex, involving updating a player's status within the TeamBattle doc
     }
   };
 
   const handleTimeUp = async () => {
-    if (!battleData || !player || battleData.status !== 'in-progress') return;
+    if (!player) return;
+    
+    if (gameState === 'inGame' && battleData && battleData.status === 'in-progress') {
+        const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
+        if (!opponent) return; 
 
-    const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
-    if (!opponent) return; 
+        toast({ title: "Time's Up!", description: "You ran out of time and forfeited the duel.", variant: "destructive" });
 
-    toast({ title: "Time's Up!", description: "You ran out of time and forfeited the match.", variant: "destructive" });
-
-    if (IS_FIREBASE_CONFIGURED) {
-        await updateDoc(doc(db, "battles", battleData.id), {
-            status: 'forfeited',
-            winnerId: opponent.id 
-        });
-    } else {
-        const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
-        setBattleData(finalBattleState);
-        await processGameEnd(finalBattleState);
-        setGameState('gameOver');
+        if (IS_FIREBASE_CONFIGURED) {
+            await updateDoc(doc(db, "battles", battleData.id), {
+                status: 'forfeited',
+                winnerId: opponent.id 
+            });
+        } else {
+            const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
+            setBattleData(finalBattleState);
+            await processGameEnd(finalBattleState);
+            setGameState('gameOver');
+        }
+    } else if (gameState === 'inTeamGame' && teamBattleData) {
+        // Logic for time up in a team game
+        toast({ title: "Time's Up!", description: "The match timer has expired.", variant: "destructive" });
+        // This might involve calculating scores based on submissions so far
     }
   };
 
@@ -814,9 +863,13 @@ export default function ArenaPage() {
             setGameState('gameOver');
         }
     } else if (currentGameState === 'formingTeam') {
-        cleanupListeners(); // Includes removing player from team slot if they are in one.
-        await handleLeaveLobby();
+        await handleLeaveLobby(); // This handles DB cleanup for team lobby
         await refundCoins();
+        resetGameState(true); // Resets all states
+    } else if (currentGameState === 'inTeamGame') {
+        // Forfeiting a team game is complex. For now, just leave.
+        // No refund.
+        toast({ title: "Match Left", description: "You have left the team battle." });
         resetGameState(true);
     }
   };
@@ -841,9 +894,13 @@ export default function ArenaPage() {
 
   useEffect(() => {
     // This effect now only runs when the battle data first arrives and initializes the code editor.
-    if (battleData?.question && player && !hasInitializedCode.current) {
-        const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
-        const initialCode = meInDb?.code || getCodePlaceholder(language, battleData.question);
+    if ((battleData?.question || teamBattleData?.question) && player && !hasInitializedCode.current) {
+        const question = battleData?.question || teamBattleData?.question;
+        
+        // This part is for 1v1, it needs to be adapted for team battles if code is stored per player
+        const meInDb = battleData ? (battleData.player1.id === player.id ? battleData.player1 : battleData.player2) : null;
+        
+        const initialCode = meInDb?.code || getCodePlaceholder(language, question);
         const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
 
         if(!meInDb?.hasSubmitted) {
@@ -852,7 +909,7 @@ export default function ArenaPage() {
         }
         hasInitializedCode.current = true;
     }
-  }, [battleData, player, language]);
+  }, [battleData, teamBattleData, player, language]);
 
 
   // Make sure to clean up any listeners on component unmount
@@ -864,12 +921,13 @@ export default function ArenaPage() {
 
 
   const onLanguageChange = async (newLang: SupportedLanguage) => {
-    if (!player || !battleData) return;
+    if (!player) return;
     setLanguage(newLang);
-    const newCode = getCodePlaceholder(newLang, battleData.question);
+    const question = battleData?.question || teamBattleData?.question;
+    const newCode = getCodePlaceholder(newLang, question);
     setCode(newCode);
 
-    if (IS_FIREBASE_CONFIGURED && battleData.id && battleData.status !== 'waiting') {
+    if (IS_FIREBASE_CONFIGURED && gameState === 'inGame' && battleData?.id && battleData.status !== 'waiting') {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (playerKey === 'player2' && !battleData.player2) return;
 
@@ -877,8 +935,7 @@ export default function ArenaPage() {
             [`${playerKey}.language`]: newLang,
             [`${playerKey}.code`]: newCode,
         });
-    } else if (!IS_FIREBASE_CONFIGURED) {
-        // Handle bot match case
+    } else if (!IS_FIREBASE_CONFIGURED && gameState === 'inGame' && battleData) {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (!playerKey || !battleData[playerKey]) return;
         setBattleData(currentBattle => {
@@ -893,6 +950,7 @@ export default function ArenaPage() {
             };
         });
     }
+    // TODO: Add logic for language change in team battles if needed
   }
   
   const handleFindNewMatch = () => {
@@ -931,13 +989,8 @@ export default function ArenaPage() {
                 />
             );
         case 'inGame':
-        case 'inTeamGame':
-            if (!battleData && !teamBattleId) {
+            if (!battleData) {
                 return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading match...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
-            }
-            if(gameState === 'inTeamGame') {
-                 // Placeholder for team battle view
-                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Team Battle in Progress! (UI not built yet)</p><p>Battle ID: {teamBattleId}</p></div>;
             }
             if (battleData && player) {
               return (
@@ -956,6 +1009,24 @@ export default function ArenaPage() {
               );
             }
             return null;
+        case 'inTeamGame':
+             if (!teamBattleData || !player) {
+                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading Team Battle...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
+            }
+            return (
+                <TeamBattleView 
+                    battleData={teamBattleData}
+                    player={player}
+                    timeRemaining={timeRemaining}
+                    code={code}
+                    onCodeChange={setCode}
+                    language={language}
+                    onLanguageChange={onLanguageChange}
+                    onSubmitCode={handleSubmitCode}
+                    onTimeUp={handleTimeUp}
+                    onForfeit={() => setShowLeaveConfirm(true)}
+                />
+            );
         case 'submittingComparison':
             return (
                 <div className="flex flex-col items-center justify-center h-full text-center p-4">
@@ -999,7 +1070,7 @@ export default function ArenaPage() {
           </div>
         </div>
       )}
-      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={gameState === 'searching' ? 'search' : (gameState === 'formingTeam' ? 'lobby' : 'game')}/>
+      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={gameState === 'searching' ? 'search' : (gameState === 'formingTeam' ? 'lobby' : (gameState === 'inGame' || gameState === 'inTeamGame' ? 'game' : null))}/>
     </>
   );
 }
