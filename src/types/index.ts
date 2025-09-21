@@ -1,4 +1,5 @@
 
+
 import type { ElementType } from 'react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
@@ -49,6 +50,18 @@ export interface Battle {
   startedAt?: any; // Firestore Timestamp
   winnerId?: string;
   comparisonResult?: CompareCodeSubmissionsOutput;
+}
+
+export interface TeamLobbyPlayer {
+    id: string;
+    username: string;
+    avatarUrl?: string;
+    rating: number;
+}
+
+export interface TeamLobby {
+    blue: { [slot: string]: TeamLobbyPlayer | null };
+    red: { [slot: string]: TeamLobbyPlayer | null };
 }
 
 export interface TeamPlayer extends Player {
@@ -126,3 +139,6 @@ export interface MatchHistoryEntry {
   wager: number;
   date: string; 
 }
+
+
+    

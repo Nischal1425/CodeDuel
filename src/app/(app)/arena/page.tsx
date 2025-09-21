@@ -14,7 +14,7 @@ import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submis
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
@@ -46,6 +46,12 @@ const LOBBIES: LobbyInfo[] = [
   { name: 'medium', title: 'Team DeathMatch', description: '4v4 tactical coding battle.', icon: Users, baseTime: 15, entryFee: 120, gameMode: '4v4' },
 ];
 
+const initialTeamLobbyState: TeamLobby = {
+    blue: { '1': null, '2': null, '3': null, '4': null },
+    red: { '1': null, '2': null, '3': null, '4': null },
+};
+
+
 export default function ArenaPage() {
   const { player } = useAuth(); 
   const { toast } = useToast();
@@ -60,10 +66,14 @@ export default function ArenaPage() {
   
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
+  const [teamLobbyData, setTeamLobbyData] = useState<TeamLobby | null>(null);
+
   
   const battleListenerUnsubscribe = useRef<() => void | undefined>();
   const playerQueueRef = useRef<any>();
   const playerBattleListenerUnsubscribe = useRef<() => void | undefined>();
+  const teamLobbyRef = useRef<any>();
+  const teamLobbyListenerUnsubscribe = useRef<() => void | undefined>();
 
 
   const cleanupListeners = useCallback(() => {
@@ -74,6 +84,11 @@ export default function ArenaPage() {
     if (playerQueueRef.current) {
         remove(playerQueueRef.current);
         playerQueueRef.current = null;
+    }
+     if (teamLobbyListenerUnsubscribe.current) {
+        teamLobbyListenerUnsubscribe.current();
+        teamLobbyListenerUnsubscribe.current = undefined;
+        teamLobbyRef.current = null;
     }
     if (playerBattleListenerUnsubscribe.current) {
         playerBattleListenerUnsubscribe.current();
@@ -97,6 +112,7 @@ export default function ArenaPage() {
     setShowLeaveConfirm(false);
     setBattleId(null);
     setBattleData(null);
+    setTeamLobbyData(null);
     hasInitializedCode.current = false;
   }, [cleanupListeners]);
 
@@ -422,6 +438,49 @@ export default function ArenaPage() {
       }
   }, [player, toast, resetGameState]);
 
+
+  const setupTeamLobbyListener = useCallback(async (lobbyName: DifficultyLobby) => {
+    if (!rtdb) return;
+    goOnline(rtdb);
+    
+    teamLobbyRef.current = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
+    
+    // Initial fetch to create the lobby if it doesn't exist
+    const snapshot = await get(teamLobbyRef.current);
+    if (!snapshot.exists()) {
+        await set(teamLobbyRef.current, initialTeamLobbyState);
+    }
+    
+    teamLobbyListenerUnsubscribe.current = onValue(teamLobbyRef.current, (snapshot) => {
+        const data = snapshot.val();
+        if(data){
+            setTeamLobbyData(data);
+        } else {
+             // If the lobby gets deleted, reset to a default state
+            setTeamLobbyData(initialTeamLobbyState);
+        }
+    });
+  }, []);
+
+  const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => {
+      if (!player || !rtdb || !selectedLobbyName) return;
+
+      const teamSlotRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/${team}/${slot}`);
+
+      try {
+        await set(teamSlotRef, { 
+            id: player.id,
+            username: player.username,
+            avatarUrl: player.avatarUrl || '',
+            rating: player.rating
+        });
+      } catch (error) {
+        toast({ title: 'Error Joining Team', description: 'Could not join the team slot. Please try again.', variant: 'destructive'});
+        console.error("Error setting team slot:", error);
+      }
+  };
+  
+
   const handleSelectLobby = async (lobbyInfo: LobbyInfo) => {
     if (!player) return;
 
@@ -433,6 +492,11 @@ export default function ArenaPage() {
     if (lobbyInfo.gameMode === '4v4') {
         setSelectedLobbyName(lobbyInfo.name);
         setGameState('formingTeam');
+        if(IS_FIREBASE_CONFIGURED) {
+            await setupTeamLobbyListener(lobbyInfo.name);
+        } else {
+            setTeamLobbyData(initialTeamLobbyState);
+        }
         return;
     }
 
@@ -594,6 +658,26 @@ export default function ArenaPage() {
     }
   };
 
+  const handleLeaveLobby = async () => {
+    if (!player || !rtdb || !selectedLobbyName || !teamLobbyData) return;
+    
+    let playerFoundAndRemoved = false;
+    for (const team of ['blue', 'red'] as const) {
+        for (const slot of ['1', '2', '3', '4'] as const) {
+            if (teamLobbyData[team][slot]?.id === player.id) {
+                const teamSlotRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/${team}/${slot}`);
+                await set(teamSlotRef, null);
+                playerFoundAndRemoved = true;
+                break;
+            }
+        }
+        if (playerFoundAndRemoved) break;
+    }
+    
+    resetGameState(true);
+    toast({ title: 'Left Lobby', description: 'You have left the team formation lobby.'});
+  };
+
 
   const handleLeaveConfirm = async () => {
     if (!player) return;
@@ -640,6 +724,8 @@ export default function ArenaPage() {
             await processGameEnd(finalBattleState);
             setGameState('gameOver');
         }
+    } else if (currentGameState === 'formingTeam') {
+        await handleLeaveLobby();
     }
   };
 
@@ -741,10 +827,15 @@ export default function ArenaPage() {
                 />
             );
         case 'formingTeam':
+             if (!teamLobbyData) {
+                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading Team Lobby...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
+             }
             return (
                 <TeamFormationLobby 
                     player={player}
-                    onLeave={() => resetGameState(true)}
+                    lobbyData={teamLobbyData}
+                    onJoinTeam={handleJoinTeam}
+                    onLeave={() => setShowLeaveConfirm(true)}
                 />
             );
         case 'inGame':
@@ -808,15 +899,19 @@ export default function ArenaPage() {
           </div>
         </div>
       )}
-      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={gameState === 'searching' ? 'search' : 'game'}/>
+      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={gameState === 'searching' ? 'search' : (gameState === 'formingTeam' ? 'lobby' : 'game')}/>
     </>
   );
 }
 
-export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | null }) {
+export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | 'lobby' | null }) {
   if (!type) return null;
-  const title = type === 'search' ? "Cancel Search?" : "Forfeit Match?";
-  let description = type === 'search' ? "Are you sure you want to cancel the search? Your entry fee will be refunded." : "Are you sure you want to forfeit? This will count as a loss, and your wager will be lost.";
+  const title = type === 'search' ? "Cancel Search?" : type === 'lobby' ? "Leave Lobby?" : "Forfeit Match?";
+  let description = type === 'search' 
+    ? "Are you sure you want to cancel the search? Your entry fee will be refunded." 
+    : type === 'lobby' 
+    ? "Are you sure you want to leave the team formation lobby?"
+    : "Are you sure you want to forfeit? This will count as a loss, and your wager will be lost.";
     
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
@@ -828,7 +923,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => onOpenChange(false)}>Stay</AlertDialogCancel>
           <AlertDialogAction onClick={onConfirm} className={cn(type === 'game' && 'bg-destructive hover:bg-destructive/90 text-destructive-foreground')}>
-            {type === 'search' ? "Leave" : "Forfeit"}
+            {type === 'search' ? "Cancel" : type === 'lobby' ? "Leave" : "Forfeit"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -836,3 +931,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
   );
 }
 
+
+
+
+    

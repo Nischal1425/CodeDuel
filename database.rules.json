@@ -1,6 +1,11 @@
+
 {
   "rules": {
     "matchmakingQueue": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "teamMatchmakingQueue": {
       ".read": "auth != null",
       ".write": "auth != null"
     },
@@ -12,3 +17,6 @@
     }
   }
 }
+
+
+    

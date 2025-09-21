@@ -6,45 +6,44 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Users, LogOut, Loader2 } from 'lucide-react';
-import type { Player } from '@/types';
+import type { Player, TeamLobby } from '@/types';
 import { cn } from '@/lib/utils';
 
 
 interface TeamFormationLobbyProps {
   player: Player | null;
+  lobbyData: TeamLobby;
+  onJoinTeam: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void;
   onLeave: () => void;
 }
 
-const mockTeam = [
-    { slot: 1, player: null },
-    { slot: 2, player: null },
-    { slot: 3, player: null },
-    { slot: 4, player: null },
-];
+const SLOTS: ('1' | '2' | '3' | '4')[] = ['1', '2', '3', '4'];
 
-function TeamSlot({ slot, player, onJoin, teamName, disabled }: { slot: number; player: Player | null; onJoin: (team: 'blue' | 'red') => void; teamName: 'blue' | 'red'; disabled?: boolean }) {
-    const canJoin = !player && !disabled;
+
+function TeamSlot({ slot, playerInfo, onJoin, teamName, disabled }: { slot: '1' | '2' | '3' | '4'; playerInfo: { id: string; username: string; avatarUrl?: string; rating: number; } | null; onJoin: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void; teamName: 'blue' | 'red'; disabled?: boolean }) {
+    const canJoin = !playerInfo && !disabled;
+
     return (
         <div className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
             <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10 border-2 border-muted">
-                    {player ? (
+                    {playerInfo ? (
                         <>
-                         <AvatarImage src={player.avatarUrl} alt={player.username} data-ai-hint="avatar placeholder" />
-                         <AvatarFallback>{player.username.substring(0, 2).toUpperCase()}</AvatarFallback>
+                         <AvatarImage src={playerInfo.avatarUrl} alt={playerInfo.username} data-ai-hint="avatar placeholder" />
+                         <AvatarFallback>{playerInfo.username.substring(0, 2).toUpperCase()}</AvatarFallback>
                         </>
                     ) : (
                         <AvatarFallback>?</AvatarFallback>
                     )}
                 </Avatar>
                 <div className="flex flex-col">
-                   <span className="font-semibold text-sm text-foreground">{player?.username || `Slot ${slot}`}</span>
-                   {player && <span className="text-xs text-muted-foreground">Rating: {player.rating}</span>}
+                   <span className="font-semibold text-sm text-foreground">{playerInfo?.username || `Slot ${slot}`}</span>
+                   {playerInfo && <span className="text-xs text-muted-foreground">Rating: {playerInfo.rating}</span>}
                 </div>
             </div>
             {canJoin ? (
-                 <Button size="sm" variant="secondary" onClick={() => onJoin(teamName)}>Join</Button>
-            ) : player ? (
+                 <Button size="sm" variant="secondary" onClick={() => onJoin(teamName, slot)}>Join</Button>
+            ) : playerInfo ? (
                 <span className="text-xs font-medium text-green-500">Ready</span>
             ) : null}
         </div>
@@ -52,7 +51,7 @@ function TeamSlot({ slot, player, onJoin, teamName, disabled }: { slot: number; 
 }
 
 
-function TeamCard({ teamName, team, onJoin, disabled }: { teamName: 'Blue' | 'Red'; team: any[]; onJoin: (team: 'blue' | 'red') => void; disabled?: boolean; }) {
+function TeamCard({ teamName, teamData, onJoin, disabled }: { teamName: 'Blue' | 'Red'; teamData: TeamLobby['blue'] | TeamLobby['red']; onJoin: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void; disabled?: boolean; }) {
     const teamColor = teamName === 'Blue' ? 'blue' : 'red';
     
     return (
@@ -61,14 +60,14 @@ function TeamCard({ teamName, team, onJoin, disabled }: { teamName: 'Blue' | 'Re
                 <CardTitle className="text-2xl">{teamName} Team</CardTitle>
             </CardHeader>
             <CardContent className="p-4 space-y-3">
-                {team.map(p => <TeamSlot key={p.slot} slot={p.slot} player={p.player} onJoin={onJoin} teamName={teamName.toLowerCase() as 'blue' | 'red'} disabled={disabled} />)}
+                {SLOTS.map(slot => <TeamSlot key={slot} slot={slot} playerInfo={teamData[slot]} onJoin={onJoin} teamName={teamName.toLowerCase() as 'blue' | 'red'} disabled={disabled} />)}
             </CardContent>
         </Card>
     );
 }
 
 
-export function TeamFormationLobby({ player, onLeave }: TeamFormationLobbyProps) {
+export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: TeamFormationLobbyProps) {
     if (!player) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-4">
@@ -77,7 +76,8 @@ export function TeamFormationLobby({ player, onLeave }: TeamFormationLobbyProps)
         );
     }
     
-    const isPlayerInLobby = false; // Mock data for now
+    const isPlayerInLobby = Object.values(lobbyData.blue).some(p => p?.id === player.id) || Object.values(lobbyData.red).some(p => p?.id === player.id);
+    const totalPlayers = Object.values(lobbyData.blue).filter(p => p).length + Object.values(lobbyData.red).filter(p => p).length;
 
     return (
         <div className="container mx-auto py-8 h-full flex flex-col justify-center">
@@ -89,12 +89,12 @@ export function TeamFormationLobby({ player, onLeave }: TeamFormationLobbyProps)
                 </CardHeader>
                 <CardContent className="mt-6">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <TeamCard teamName="Blue" team={mockTeam} onJoin={() => {}} disabled={isPlayerInLobby}/>
-                        <TeamCard teamName="Red" team={mockTeam} onJoin={() => {}} disabled={isPlayerInLobby}/>
+                        <TeamCard teamName="Blue" teamData={lobbyData.blue} onJoin={onJoinTeam} disabled={isPlayerInLobby}/>
+                        <TeamCard teamName="Red" teamData={lobbyData.red} onJoin={onJoinTeam} disabled={isPlayerInLobby}/>
                     </div>
                 </CardContent>
                 <CardFooter className="flex-col gap-4">
-                    <p className="text-sm text-muted-foreground">Waiting for more players... (0/8)</p>
+                    <p className="text-sm text-muted-foreground">Waiting for more players... ({totalPlayers}/8)</p>
                     <Button variant="outline" onClick={onLeave}>
                         <LogOut className="mr-2 h-4 w-4" /> Leave Lobby
                     </Button>
@@ -103,3 +103,6 @@ export function TeamFormationLobby({ player, onLeave }: TeamFormationLobbyProps)
         </div>
     );
 }
+
+
+    
