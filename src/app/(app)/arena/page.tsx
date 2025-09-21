@@ -638,9 +638,17 @@ export default function ArenaPage() {
     return `// Placeholder for ${selectedLang}.`;
   };
 
+  // This effect now only runs when the language changes, or when the game initially loads.
   useEffect(() => {
-    if (battleData?.question && language) {
-      const meInDb = battleData.player1.id === player?.id ? battleData.player1 : battleData.player2;
+    if (battleData?.question) {
+        setCode(getCodePlaceholder(language, battleData.question));
+    }
+  }, [language, battleData?.question]); // It no longer depends on the entire battleData object.
+
+  // This effect populates the code editor ONCE when the battle starts.
+  useEffect(() => {
+    if (battleData?.question && player) {
+      const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
       
       if (meInDb?.code) {
         setCode(meInDb.code);
@@ -652,7 +660,7 @@ export default function ArenaPage() {
           setLanguage(meInDb.language);
       }
     }
-  }, [language, battleData, player]);
+  }, [battleData?.id, battleData?.question, player?.id]); // Runs only when a new battle starts
 
   // Make sure to clean up any listeners on component unmount
   useEffect(() => {
