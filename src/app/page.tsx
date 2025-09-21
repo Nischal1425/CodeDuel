@@ -58,43 +58,47 @@ export default function LandingPage() {
     } catch (error) {
         const authError = error as AuthError;
         // If sign-in fails, it could be a new user or a wrong password.
-        // We'll try to create an account. If that also fails, it's likely an issue
-        // like "password too weak" or the email is already in use with a different credential type.
-        try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-            const user = userCredential.user;
+        // We'll try to create an account only if the error suggests the user is not found.
+        if (authError.code === 'auth/invalid-credential') {
+             try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
 
-            const newPlayer: Omit<Player, 'id'> = {
-                username: email.split('@')[0] || 'New Duelist',
-                email: email,
-                coins: 500, // Starting coins
-                rank: 1,
-                rating: 1000, // Starting rating
-                avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
-                unlockedAchievements: [],
-                matchesPlayed: 0,
-                wins: 0,
-                losses: 0,
-                winStreak: 0,
-                isKycVerified: false,
-            };
-            
-            await setDoc(doc(db, "players", user.uid), newPlayer);
-            toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
+                const newPlayer: Omit<Player, 'id'> = {
+                    username: email.split('@')[0] || 'New Duelist',
+                    email: email,
+                    coins: 500, // Starting coins
+                    rank: 1,
+                    rating: 1000, // Starting rating
+                    avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
+                    unlockedAchievements: [],
+                    matchesPlayed: 0,
+                    wins: 0,
+                    losses: 0,
+                    winStreak: 0,
+                    isKycVerified: false,
+                };
+                
+                await setDoc(doc(db, "players", user.uid), newPlayer);
+                toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
 
-        } catch (creationError) {
-            const creationAuthError = creationError as AuthError;
-            // If sign-up also fails, show a more generic but helpful error.
-            let errorMessage = "An error occurred. Please check your credentials and try again.";
-            if (creationAuthError.code === 'auth/weak-password') {
-                errorMessage = 'The password is too weak. Please use at least 6 characters.';
-            } else if (authError.code === 'auth/invalid-credential') {
-                // This is the most likely case for a login failure on an existing account
-                errorMessage = "Incorrect password or user not found. Please check your credentials.";
+            } catch (creationError) {
+                const creationAuthError = creationError as AuthError;
+                let errorMessage = "An error occurred. Please check your credentials and try again.";
+                if (creationAuthError.code === 'auth/weak-password') {
+                    errorMessage = 'The password is too weak. Please use at least 6 characters.';
+                } else {
+                    // If account creation fails for another reason (e.g. email already exists, but initial login failed), it implies a wrong password.
+                    errorMessage = "Incorrect password. Please check your credentials and try again.";
+                }
+
+                console.error("Authentication Error: ", creationAuthError);
+                toast({ title: "Authentication Failed", description: errorMessage, variant: "destructive" });
             }
-
-            console.error("Authentication Error: ", creationAuthError);
-            toast({ title: "Authentication Failed", description: errorMessage, variant: "destructive" });
+        } else {
+            // Handle other sign-in errors that are not 'auth/invalid-credential'
+            console.error("Authentication Error: ", authError);
+            toast({ title: "Authentication Failed", description: "An unexpected error occurred during login.", variant: "destructive" });
         }
     } finally {
         setIsLoggingIn(false);
