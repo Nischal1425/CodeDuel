@@ -54,46 +54,47 @@ export default function LandingPage() {
     
     try {
         await signInWithEmailAndPassword(auth, email, password);
-        // Auth state change will handle setting player ID and redirecting
         toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
-
     } catch (error) {
         const authError = error as AuthError;
-        if (authError.code === 'auth/user-not-found') {
-            // User doesn't exist, so create a new account
-            try {
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                const user = userCredential.user;
+        // If sign-in fails, it could be a new user or a wrong password.
+        // We'll try to create an account. If that also fails, it's likely an issue
+        // like "password too weak" or the email is already in use with a different credential type.
+        try {
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            const user = userCredential.user;
 
-                const newPlayer: Omit<Player, 'id'> = {
-                    username: email.split('@')[0] || 'New Duelist',
-                    email: email,
-                    coins: 500, // Starting coins
-                    rank: 1,
-                    rating: 1000, // Starting rating
-                    avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
-                    unlockedAchievements: [],
-                    matchesPlayed: 0,
-                    wins: 0,
-                    losses: 0,
-                    winStreak: 0,
-                    isKycVerified: false,
-                };
-                
-                await setDoc(doc(db, "players", user.uid), newPlayer);
-                // Auth state change will handle the rest
-                toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
+            const newPlayer: Omit<Player, 'id'> = {
+                username: email.split('@')[0] || 'New Duelist',
+                email: email,
+                coins: 500, // Starting coins
+                rank: 1,
+                rating: 1000, // Starting rating
+                avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
+                unlockedAchievements: [],
+                matchesPlayed: 0,
+                wins: 0,
+                losses: 0,
+                winStreak: 0,
+                isKycVerified: false,
+            };
+            
+            await setDoc(doc(db, "players", user.uid), newPlayer);
+            toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
 
-            } catch (creationError) {
-                const creationAuthError = creationError as AuthError;
-                console.error("Account Creation Error: ", creationAuthError);
-                toast({ title: "Sign Up Failed", description: creationAuthError.message, variant: "destructive" });
+        } catch (creationError) {
+            const creationAuthError = creationError as AuthError;
+            // If sign-up also fails, show a more generic but helpful error.
+            let errorMessage = "An error occurred. Please check your credentials and try again.";
+            if (creationAuthError.code === 'auth/weak-password') {
+                errorMessage = 'The password is too weak. Please use at least 6 characters.';
+            } else if (authError.code === 'auth/invalid-credential') {
+                // This is the most likely case for a login failure on an existing account
+                errorMessage = "Incorrect password or user not found. Please check your credentials.";
             }
-        } else if (authError.code === 'auth/wrong-password') {
-            toast({ title: "Login Failed", description: "Incorrect password. Please try again.", variant: "destructive" });
-        } else {
-            console.error("Login Error: ", authError);
-            toast({ title: "Login Failed", description: authError.message, variant: "destructive" });
+
+            console.error("Authentication Error: ", creationAuthError);
+            toast({ title: "Authentication Failed", description: errorMessage, variant: "destructive" });
         }
     } finally {
         setIsLoggingIn(false);
