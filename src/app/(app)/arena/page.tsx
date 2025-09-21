@@ -573,7 +573,7 @@ export default function ArenaPage() {
              setTeamLobbyData(initialTeamLobbyState);
         }
     });
-  }, [player, selectedLobbyName]);
+  }, [player, selectedLobbyName, startTeamBattle, toast]);
 
   const startTeamBattle = async (finalLobbyData: TeamLobby) => {
     if (!player || !selectedLobbyName) return;
@@ -1225,14 +1225,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-
-
-
-    
-
-    
-
-    
 
     
