@@ -52,7 +52,7 @@ function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
 
 export default function LandingPage() {
   const router = useRouter();
-  const { isLoading, player } = useAuth();
+  const { isLoading, player, setPlayerId } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -77,8 +77,9 @@ export default function LandingPage() {
     if (!IS_FIREBASE_CONFIGURED) {
       const mockPlayerId = `mock-${email.replace(/@.*/, '')}`;
       await new Promise(resolve => setTimeout(resolve, 500));
-      const { setPlayerId } = useAuth();
-      setPlayerId(mockPlayerId);
+      if (setPlayerId) {
+        setPlayerId(mockPlayerId);
+      }
       router.push('/dashboard');
       setIsProcessing(false);
       return;
@@ -170,6 +171,12 @@ export default function LandingPage() {
         }
     } catch (error) {
         const authError = error as AuthError;
+        if (authError.code === 'auth/popup-closed-by-user') {
+            // Silently ignore this error as it's a user action, not a failure.
+            console.log("Google Sign-In popup closed by user.");
+            return;
+        }
+
         console.error("Google Sign-In Error:", authError);
         toast({
             title: "Google Sign-In Failed",
