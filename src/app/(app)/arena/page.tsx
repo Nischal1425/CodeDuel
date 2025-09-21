@@ -280,41 +280,56 @@ export default function ArenaPage() {
 
     rtdbRunTransaction(lobbyQueueRef, (queue) => {
       if (queue === null) {
-        const newQueue = {};
-        newQueue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
-        return newQueue;
+        queue = {};
       }
 
+      // Check for an opponent. Find someone who is not the current player.
       const opponentId = Object.keys(queue).find(id => id !== player.id);
       
       if (opponentId) {
-        // Opponent found, remove them from the queue
+        // --- Opponent Found ---
+        // The current player (who initiated this transaction) is NOT added to the queue.
+        // The opponent is removed from the queue.
+        const opponentDataFromQueue = queue[opponentId];
         delete queue[opponentId];
         
+        // Use an async IIFE to handle battle creation outside the transaction return.
         (async () => {
           try {
             const newBattleId = [player.id, opponentId].sort().join('_') + `_${Date.now()}`;
             const battleDocRef = doc(db, 'battles', newBattleId);
 
-            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+            // Fetch opponent's full data from Firestore
             const opponentDoc = await getDoc(doc(db, 'players', opponentId));
             if (!opponentDoc.exists()) throw new Error("Opponent data not found in Firestore.");
-            
             const opponentData = opponentDoc.data() as Player;
 
-            const player1Data = {
-              id: player.id, username: player.username, avatarUrl: player.avatarUrl,
-              language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
-            };
-            const player2Data = {
-              id: opponentId, username: opponentData.username, avatarUrl: opponentData.avatarUrl,
-              language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
-            };
+            // Generate the coding challenge for the battle
+            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
             
+            // Define player1 and player2 based on sorted IDs
+            const player1IsMe = player.id < opponentId;
+            const player1FirebaseData = {
+              id: player1IsMe ? player.id : opponentId, 
+              username: player1IsMe ? player.username : opponentData.username, 
+              avatarUrl: player1IsMe ? player.avatarUrl : opponentData.avatarUrl,
+              language: DEFAULT_LANGUAGE, 
+              code: getCodePlaceholder(DEFAULT_LANGUAGE, question), 
+              hasSubmitted: false
+            };
+            const player2FirebaseData = {
+              id: player1IsMe ? opponentId : player.id,
+              username: player1IsMe ? opponentData.username : player.username, 
+              avatarUrl: player1IsMe ? opponentData.avatarUrl : player.avatarUrl,
+              language: DEFAULT_LANGUAGE, 
+              code: getCodePlaceholder(DEFAULT_LANGUAGE, question), 
+              hasSubmitted: false
+            };
+
             const newBattle: Battle = {
               id: newBattleId,
-              player1: player.id < opponentId ? player1Data : player2Data,
-              player2: player.id < opponentId ? player2Data : player1Data,
+              player1: player1FirebaseData,
+              player2: player2FirebaseData,
               status: 'in-progress',
               difficulty: lobby.name,
               wager: lobby.entryFee,
@@ -325,7 +340,7 @@ export default function ArenaPage() {
 
             await setDoc(battleDocRef, newBattle);
             
-            // Notify both players of the battle ID
+            // Notify both players of the battle ID via RTDB
             await set(ref(rtdb, `playerBattles/${player.id}`), newBattleId);
             await set(ref(rtdb, `playerBattles/${opponentId}`), newBattleId);
 
@@ -336,9 +351,11 @@ export default function ArenaPage() {
           }
         })();
 
-        return queue; // Return queue with opponent removed
+        // Return the queue with the opponent removed. The current player was never added.
+        return queue; 
       } else {
-        // No opponent found, add current player to the queue
+        // --- No Opponent Found ---
+        // Add the current player to the queue to wait for an opponent.
         if (!queue[player.id]) {
             queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
         }
@@ -517,7 +534,6 @@ export default function ArenaPage() {
 
     toast({ title: "Code Submitted!", description: "Your solution is locked in.", className: "bg-primary text-primary-foreground" });
     
-    // Determine which player key to use ('player1' or 'player2')
     const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
 
     if (IS_FIREBASE_CONFIGURED) {
@@ -529,8 +545,6 @@ export default function ArenaPage() {
         await updateDoc(doc(db, "battles", battleData.id), updatePayload);
     } else {
         if (!playerKey || !battleData[playerKey]) return;
-
-        // Create a definitive, final battle state with the latest code for submission
         const finalBattleState: Battle = {
             ...battleData,
             [playerKey]: {
@@ -539,14 +553,13 @@ export default function ArenaPage() {
                 language: language,
                 hasSubmitted: true,
             },
-            // Also ensure the opponent's data is up-to-date
             player2: {
               ...battleData.player2!,
-              hasSubmitted: true, // In bot matches, the bot has always submitted
+              hasSubmitted: true, 
             }
         };
 
-        setBattleData(finalBattleState); // Update local state immediately
+        setBattleData(finalBattleState);
         setGameState('submittingComparison');
         await handleSubmissionFinalization(finalBattleState);
     }
@@ -638,29 +651,31 @@ export default function ArenaPage() {
     return `// Placeholder for ${selectedLang}.`;
   };
 
-  // This effect now only runs when the language changes, or when the game initially loads.
+  useEffect(() => {
+    if (gameState === 'inGame' && battleData?.question && player) {
+      const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
+      const initialCode = meInDb?.code || getCodePlaceholder(language, battleData.question);
+      const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
+      
+      setCode(initialCode);
+      setLanguage(initialLanguage);
+    }
+  }, [gameState, battleData?.id, player?.id]); // Runs only when a new battle starts or game state changes to inGame
+
+
   useEffect(() => {
     if (battleData?.question) {
-        setCode(getCodePlaceholder(language, battleData.question));
+        setCode(currentCode => {
+            // Only replace code if it's empty or the placeholder for a DIFFERENT language
+            const isDefaultPlaceholder = Object.values(getCodePlaceholder(language, null)).includes(currentCode.trim());
+            if (!currentCode.trim() || isDefaultPlaceholder) {
+                return getCodePlaceholder(language, battleData.question);
+            }
+            return currentCode;
+        });
     }
-  }, [language, battleData?.question]); // It no longer depends on the entire battleData object.
+  }, [language]);
 
-  // This effect populates the code editor ONCE when the battle starts.
-  useEffect(() => {
-    if (battleData?.question && player) {
-      const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
-      
-      if (meInDb?.code) {
-        setCode(meInDb.code);
-      } else {
-        setCode(getCodePlaceholder(language, battleData.question));
-      }
-
-      if (meInDb?.language) {
-          setLanguage(meInDb.language);
-      }
-    }
-  }, [battleData?.id, battleData?.question, player?.id]); // Runs only when a new battle starts
 
   // Make sure to clean up any listeners on component unmount
   useEffect(() => {
@@ -811,12 +826,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
-
-    
-
-    
-
