@@ -1,16 +1,6 @@
 {
   "rules": {
-    "matchmakingQueue": {
-      "$lobby": {
-        ".read": "auth != null",
-        ".write": "auth != null"
-      }
-    },
-    "playerBattles": {
-      "$uid": {
-        ".read": "$uid === auth.uid",
-        ".write": "$uid === auth.uid"
-      }
-    }
+    ".read": "now < 1758738600000",
+    ".write": "now < 1758738600000"
   }
 }
