@@ -11,14 +11,44 @@ import { useAuth } from '@/contexts/AuthContext';
 import { CodeDuelLogo } from '@/components/CodeDuelLogo';
 import { Swords, LogIn, Info, Loader2 } from 'lucide-react';
 import type { Player } from '@/types';
-import { collection, doc, setDoc } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase';
+import { collection, doc, setDoc, getDoc } from 'firebase/firestore';
+import { db, auth, googleProvider } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, type AuthError } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, type AuthError, signInWithPopup, getAdditionalUserInfo } from 'firebase/auth';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Separator } from '@/components/ui/separator';
 
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+
+function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
+    return (
+      <svg
+        {...props}
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 48 48"
+        width="24px"
+        height="24px"
+      >
+        <path
+          fill="#FFC107"
+          d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12s5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24s8.955,20,20,20s20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"
+        />
+        <path
+          fill="#FF3D00"
+          d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"
+        />
+        <path
+          fill="#4CAF50"
+          d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"
+        />
+        <path
+          fill="#1976D2"
+          d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.574l6.19,5.238C39.712,35.619,44,29.566,44,24C44,22.659,43.862,21.35,43.611,20.083z"
+        />
+      </svg>
+    );
+  }
 
 export default function LandingPage() {
   const router = useRouter();
@@ -26,6 +56,7 @@ export default function LandingPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isGoogleProcessing, setIsGoogleProcessing] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const { toast } = useToast();
 
@@ -44,11 +75,8 @@ export default function LandingPage() {
     setIsProcessing(true);
 
     if (!IS_FIREBASE_CONFIGURED) {
-      // Mock login for offline mode, no real auth happens
       const mockPlayerId = `mock-${email.replace(/@.*/, '')}`;
       await new Promise(resolve => setTimeout(resolve, 500));
-      // In offline mode, AuthProvider handles creating a mock player
-      // We just need to set the ID and let it take over.
       const { setPlayerId } = useAuth();
       setPlayerId(mockPlayerId);
       router.push('/dashboard');
@@ -61,7 +89,6 @@ export default function LandingPage() {
       try {
         await signInWithEmailAndPassword(auth, email, password);
         toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
-        // AuthProvider's onAuthStateChanged will handle the redirect
       } catch (error) {
         const authError = error as AuthError;
         console.error("Login Error: ", authError);
@@ -75,9 +102,9 @@ export default function LandingPage() {
         const newPlayer: Omit<Player, 'id'> = {
             username: email.split('@')[0] || 'New Duelist',
             email: email,
-            coins: 500, // Starting coins
+            coins: 500,
             rank: 1,
-            rating: 1000, // Starting rating
+            rating: 1000,
             avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
             unlockedAchievements: [],
             matchesPlayed: 0,
@@ -89,7 +116,6 @@ export default function LandingPage() {
         
         await setDoc(doc(db, "players", user.uid), newPlayer);
         toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
-        // AuthProvider's onAuthStateChanged will handle the redirect
       } catch (error) {
         const authError = error as AuthError;
         let errorMessage = "An error occurred during sign-up.";
@@ -102,9 +128,59 @@ export default function LandingPage() {
         toast({ title: "Sign-up Failed", description: errorMessage, variant: "destructive" });
       }
     }
-
     setIsProcessing(false);
   };
+  
+  const handleGoogleSignIn = async () => {
+    if (!IS_FIREBASE_CONFIGURED) {
+        toast({ title: "Offline Mode", description: "Google Sign-In is not available in offline mode.", variant: "destructive" });
+        return;
+    }
+
+    setIsGoogleProcessing(true);
+    try {
+        const result = await signInWithPopup(auth, googleProvider);
+        const user = result.user;
+        const additionalInfo = getAdditionalUserInfo(result);
+        
+        if (additionalInfo?.isNewUser) {
+            const playerRef = doc(db, "players", user.uid);
+            const docSnap = await getDoc(playerRef);
+
+            if (!docSnap.exists()) {
+                const newPlayer: Omit<Player, 'id'> = {
+                    username: user.displayName || user.email?.split('@')[0] || 'New Duelist',
+                    email: user.email || '',
+                    coins: 500,
+                    rank: 1,
+                    rating: 1000,
+                    avatarUrl: user.photoURL || `https://placehold.co/100x100.png?text=${user.displayName?.substring(0,1).toUpperCase() || 'A'}`,
+                    unlockedAchievements: [],
+                    matchesPlayed: 0,
+                    wins: 0,
+                    losses: 0,
+                    winStreak: 0,
+                    isKycVerified: false,
+                };
+                await setDoc(playerRef, newPlayer);
+                toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
+            }
+        } else {
+            toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
+        }
+    } catch (error) {
+        const authError = error as AuthError;
+        console.error("Google Sign-In Error:", authError);
+        toast({
+            title: "Google Sign-In Failed",
+            description: "Could not sign in with Google. Please try again.",
+            variant: "destructive",
+        });
+    } finally {
+        setIsGoogleProcessing(false);
+    }
+  };
+
 
   if (isLoading || (!isLoading && player)) {
     return (
@@ -204,14 +280,24 @@ export default function LandingPage() {
                                 {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                 {isProcessing ? 'Processing...' : (authMode === 'login' ? 'Login' : 'Create Account')}
                             </Button>
-                             <p className="text-xs text-muted-foreground text-center">
-                              {IS_FIREBASE_CONFIGURED 
-                                ? "Your password is handled securely by Firebase Authentication." 
-                                : "No Firebase credentials found. The app is in offline mode."
-                              }
-                            </p>
                         </CardFooter>
                     </form>
+                    <div className="relative p-6 pt-2 pb-0">
+                        <Separator />
+                        <span className="absolute left-1/2 -translate-x-1/2 top-0 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">OR</span>
+                    </div>
+                     <CardContent className="p-6 pt-4">
+                        <Button variant="outline" className="w-full" onClick={handleGoogleSignIn} disabled={isGoogleProcessing}>
+                            {isGoogleProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <GoogleIcon className="mr-2"/>}
+                             Continue with Google
+                        </Button>
+                         <p className="text-xs text-muted-foreground text-center mt-4">
+                            {IS_FIREBASE_CONFIGURED 
+                            ? "Your account is handled securely by Firebase Authentication." 
+                            : "No Firebase credentials found. The app is in offline mode."
+                            }
+                        </p>
+                    </CardContent>
                 </Tabs>
              </Card>
           </div>
