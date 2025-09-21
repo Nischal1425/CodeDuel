@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import type { FormEvent } from 'react';
@@ -630,25 +631,28 @@ export default function ArenaPage() {
     return `// Placeholder for ${selectedLang}.`;
   };
 
-  useEffect(() => {
-    if (battleData?.question && language) {
-      const meInDb = battleData.player1.id === player?.id ? battleData.player1 : battleData.player2;
-      
-      if (meInDb?.code) {
-        setCode(meInDb.code);
-      } else {
-        setCode(getCodePlaceholder(language, battleData.question));
-      }
+  const hasInitializedCode = useRef(false);
 
-      if (meInDb?.language) {
-          setLanguage(meInDb.language);
-      }
+  useEffect(() => {
+    // This effect now only runs when the battle data first arrives and initializes the code editor.
+    if (battleData?.question && player && !hasInitializedCode.current) {
+        const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
+        const initialCode = meInDb?.code || getCodePlaceholder(language, battleData.question);
+        const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
+
+        setCode(initialCode);
+        setLanguage(initialLanguage);
+        hasInitializedCode.current = true;
     }
-  }, [language, battleData, player]);
+  }, [battleData, player, language]);
+
 
   // Make sure to clean up any listeners on component unmount
   useEffect(() => {
-    return () => cleanupListeners();
+    return () => {
+        cleanupListeners();
+        hasInitializedCode.current = false;
+    }
   }, [cleanupListeners]);
 
 
@@ -685,6 +689,7 @@ export default function ArenaPage() {
   }
   
   const handleFindNewMatch = () => {
+    hasInitializedCode.current = false;
     resetGameState(true);
   };
 
@@ -803,3 +808,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     
 
     
+
