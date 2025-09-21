@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import type { MatchHistoryEntry } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, limit } from 'firebase/firestore';
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
@@ -38,13 +38,17 @@ export default function HistoryPage() {
     const fetchHistory = async () => {
       try {
         const historyCollection = collection(db, 'matchHistory');
-        // The query now only filters by player, avoiding the composite index.
-        const q = query(historyCollection, where("playerId", "==", player.id));
+        // This query is now secure because of the Firestore rule:
+        // allow list: if request.query.where.field == "playerId" && request.query.where.value == request.auth.uid;
+        const q = query(
+          historyCollection, 
+          where("playerId", "==", player.id),
+          orderBy("date", "desc"),
+          limit(50)
+        );
+
         const querySnapshot = await getDocs(q);
         const history = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MatchHistoryEntry));
-        
-        // We sort the results on the client side after fetching.
-        history.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
         
         setMatchHistory(history);
       } catch (error) {

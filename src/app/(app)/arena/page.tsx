@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import type { FormEvent } from 'react';
@@ -13,7 +14,7 @@ import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submis
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
@@ -26,6 +27,7 @@ import { ref, onValue, remove, set, get, child, goOffline, goOnline, serverTimes
 import { LobbySelection } from './_components/LobbySelection';
 import type { DifficultyLobby, LobbyInfo } from './_components/LobbySelection';
 import { SearchingView } from './_components/SearchingView';
+import { TeamFormationLobby } from './_components/TeamFormationLobby';
 import { DuelView } from './_components/DuelView';
 import { GameOverReport } from './_components/GameOverReport';
 
@@ -35,7 +37,7 @@ const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!r
 const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
 
-type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingComparison' | 'gameOver';
+type GameState = 'selectingLobby' | 'searching' | 'formingTeam' | 'inGame' | 'inTeamGame' | 'submittingComparison' | 'gameOver';
 
 const LOBBIES: LobbyInfo[] = [
   { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, entryFee: 50, gameMode: '1v1' },
@@ -95,6 +97,7 @@ export default function ArenaPage() {
     setShowLeaveConfirm(false);
     setBattleId(null);
     setBattleData(null);
+    hasInitializedCode.current = false;
   }, [cleanupListeners]);
 
   const showAchievementToast = useCallback((achievement) => {
@@ -261,20 +264,19 @@ export default function ArenaPage() {
 
   const findMatch = useCallback(async (lobby: LobbyInfo) => {
     if (!player || !rtdb) return;
-
     goOnline(rtdb);
 
     const lobbyQueueRef = ref(rtdb, `matchmakingQueue/${lobby.name}`);
-    playerQueueRef.current = child(lobbyQueueRef, player.id);
-
+    
+    // Set up a listener for my battle ID before I enter the queue
     const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
     playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
         const newBattleId = snapshot.val();
         if (newBattleId) {
             setBattleId(newBattleId);
-            remove(playerBattleRef); // Clean up the temporary node
+            remove(playerBattleRef); // Clean up temp node
             if (playerQueueRef.current) {
-                remove(playerQueueRef.current);
+                remove(playerQueueRef.current); // Clean up my queue entry if I was the one who created the match
             }
         }
     });
@@ -359,6 +361,7 @@ export default function ArenaPage() {
         // Add the current player to the queue to wait for an opponent.
         if (!queue[player.id]) {
             queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+            playerQueueRef.current = child(lobbyQueueRef, player.id);
         }
         return queue;
       }
@@ -427,9 +430,9 @@ export default function ArenaPage() {
         return;
     }
     
-    // Handle Team Deathmatch selection (placeholder for now)
     if (lobbyInfo.gameMode === '4v4') {
-        toast({ title: "Coming Soon!", description: "4v4 Team DeathMatch is still in development."});
+        setSelectedLobbyName(lobbyInfo.name);
+        setGameState('formingTeam');
         return;
     }
 
@@ -656,35 +659,29 @@ export default function ArenaPage() {
     return `// Placeholder for ${selectedLang}.`;
   };
 
-  useEffect(() => {
-    if (gameState === 'inGame' && battleData?.question && player) {
-      const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
-      const initialCode = meInDb?.code || getCodePlaceholder(language, battleData.question);
-      const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
-      
-      setCode(initialCode);
-      setLanguage(initialLanguage);
-    }
-  }, [gameState, battleData?.id, player?.id]); // Runs only when a new battle starts or game state changes to inGame
-
+  const hasInitializedCode = useRef(false);
 
   useEffect(() => {
-    if (battleData?.question) {
-        setCode(currentCode => {
-            // Only replace code if it's empty or the placeholder for a DIFFERENT language
-            const isDefaultPlaceholder = Object.values(getCodePlaceholder(language, null)).includes(currentCode.trim());
-            if (!currentCode.trim() || isDefaultPlaceholder) {
-                return getCodePlaceholder(language, battleData.question);
-            }
-            return currentCode;
-        });
+    // This effect now only runs when the battle data first arrives and initializes the code editor.
+    if (battleData?.question && player && !hasInitializedCode.current) {
+        const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
+        const initialCode = meInDb?.code || getCodePlaceholder(language, battleData.question);
+        const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
+
+        if(!meInDb?.hasSubmitted) {
+            setCode(initialCode);
+            setLanguage(initialLanguage);
+        }
+        hasInitializedCode.current = true;
     }
-  }, [language]);
+  }, [battleData, player, language]);
 
 
   // Make sure to clean up any listeners on component unmount
   useEffect(() => {
-    return () => cleanupListeners();
+    return () => {
+        cleanupListeners();
+    }
   }, [cleanupListeners]);
 
 
@@ -741,6 +738,13 @@ export default function ArenaPage() {
                 <SearchingView
                     selectedLobbyName={selectedLobbyName}
                     onCancelSearch={() => setShowLeaveConfirm(true)}
+                />
+            );
+        case 'formingTeam':
+            return (
+                <TeamFormationLobby 
+                    player={player}
+                    onLeave={() => resetGameState(true)}
                 />
             );
         case 'inGame':
@@ -831,3 +835,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
