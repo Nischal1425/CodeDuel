@@ -11,9 +11,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { CodeDuelLogo } from '@/components/CodeDuelLogo';
 import { Swords, LogIn, Info, Loader2 } from 'lucide-react';
 import type { Player } from '@/types';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, setDoc } from 'firebase/firestore';
+import { db, auth } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, type AuthError } from 'firebase/auth';
+
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
@@ -51,39 +53,48 @@ export default function LandingPage() {
     }
     
     try {
-        const playersRef = collection(db, "players");
-        const q = query(playersRef, where("email", "==", email));
-        const querySnapshot = await getDocs(q);
+        await signInWithEmailAndPassword(auth, email, password);
+        // Auth state change will handle setting player ID and redirecting
+        toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
 
-        if (!querySnapshot.empty) {
-            // Player exists
-            const playerDoc = querySnapshot.docs[0];
-            setPlayerId(playerDoc.id);
-            toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
-        } else {
-            // New player, create account
-            const newPlayer: Omit<Player, 'id'> = {
-                username: email.split('@')[0] || 'New Duelist',
-                email: email,
-                coins: 500, // Starting coins
-                rank: 1,
-                rating: 1000, // Starting rating
-                avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
-                unlockedAchievements: [],
-                matchesPlayed: 0,
-                wins: 0,
-                losses: 0,
-                winStreak: 0,
-                isKycVerified: false,
-            };
-            const docRef = await addDoc(collection(db, "players"), newPlayer);
-            setPlayerId(docRef.id);
-            toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
-        }
-        router.push('/dashboard');
     } catch (error) {
-        console.error("Login Error: ", error);
-        toast({ title: "Login Failed", description: "Could not connect to the server. Please try again.", variant: "destructive" });
+        const authError = error as AuthError;
+        if (authError.code === 'auth/user-not-found') {
+            // User doesn't exist, so create a new account
+            try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                const newPlayer: Omit<Player, 'id'> = {
+                    username: email.split('@')[0] || 'New Duelist',
+                    email: email,
+                    coins: 500, // Starting coins
+                    rank: 1,
+                    rating: 1000, // Starting rating
+                    avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
+                    unlockedAchievements: [],
+                    matchesPlayed: 0,
+                    wins: 0,
+                    losses: 0,
+                    winStreak: 0,
+                    isKycVerified: false,
+                };
+                
+                await setDoc(doc(db, "players", user.uid), newPlayer);
+                // Auth state change will handle the rest
+                toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
+
+            } catch (creationError) {
+                const creationAuthError = creationError as AuthError;
+                console.error("Account Creation Error: ", creationAuthError);
+                toast({ title: "Sign Up Failed", description: creationAuthError.message, variant: "destructive" });
+            }
+        } else if (authError.code === 'auth/wrong-password') {
+            toast({ title: "Login Failed", description: "Incorrect password. Please try again.", variant: "destructive" });
+        } else {
+            console.error("Login Error: ", authError);
+            toast({ title: "Login Failed", description: authError.message, variant: "destructive" });
+        }
     } finally {
         setIsLoggingIn(false);
     }
@@ -180,7 +191,7 @@ export default function LandingPage() {
                <CardFooter className="text-xs text-muted-foreground text-center block pt-4">
                 <p>
                   {IS_FIREBASE_CONFIGURED 
-                    ? "This is a mock login/signup. Your password is not stored securely." 
+                    ? "Your password is handled securely by Firebase Authentication." 
                     : "No Firebase credentials found. The app is in offline mode."
                   }
                 </p>
