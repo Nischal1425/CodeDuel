@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React from 'react';
@@ -68,7 +69,7 @@ function TeamCard({ teamName, teamData, onJoin, disabled }: { teamName: 'Blue' |
 
 
 export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: TeamFormationLobbyProps) {
-    if (!player) {
+    if (!player || !lobbyData) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-4">
                 <p className="mb-4">Loading player data...</p><Loader2 className="h-8 w-8 animate-spin"/>
@@ -76,8 +77,13 @@ export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: T
         );
     }
     
-    const isPlayerInLobby = Object.values(lobbyData.blue).some(p => p?.id === player.id) || Object.values(lobbyData.red).some(p => p?.id === player.id);
-    const totalPlayers = Object.values(lobbyData.blue).filter(p => p).length + Object.values(lobbyData.red).filter(p => p).length;
+    const allPlayersInLobby = [
+        ...Object.values(lobbyData.blue),
+        ...Object.values(lobbyData.red)
+    ].filter(p => p !== null);
+
+    const isPlayerInLobby = allPlayersInLobby.some(p => p?.id === player.id);
+    const totalPlayers = allPlayersInLobby.length;
 
     return (
         <div className="container mx-auto py-8 h-full flex flex-col justify-center">

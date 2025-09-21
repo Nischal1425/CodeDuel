@@ -62,21 +62,16 @@ export interface TeamLobbyPlayer {
 export interface TeamLobby {
     blue: { [slot: string]: TeamLobbyPlayer | null };
     red: { [slot: string]: TeamLobbyPlayer | null };
+    battleId: string | null;
 }
-
-export interface TeamPlayer extends Player {
-    team: 'red' | 'blue';
-}
-
-export type Team = TeamPlayer[];
 
 export interface TeamBattle {
     id: string;
-    team1: Team;
-    team2: Team;
+    team1: TeamLobbyPlayer[];
+    team2: TeamLobbyPlayer[];
     team1Score: number;
     team2Score: number;
-    status: 'forming' | 'in-progress' | 'completed';
+    status: 'in-progress' | 'completed';
     difficulty: 'easy' | 'medium' | 'hard';
     wager: number;
     question: GenerateCodingChallengeOutput;

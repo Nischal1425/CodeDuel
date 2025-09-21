@@ -14,7 +14,7 @@ import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submis
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamLobbyPlayer } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
@@ -49,6 +49,7 @@ const LOBBIES: LobbyInfo[] = [
 const initialTeamLobbyState: TeamLobby = {
     blue: { '1': null, '2': null, '3': null, '4': null },
     red: { '1': null, '2': null, '3': null, '4': null },
+    battleId: null,
 };
 
 
@@ -67,6 +68,7 @@ export default function ArenaPage() {
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
   const [teamLobbyData, setTeamLobbyData] = useState<TeamLobby | null>(null);
+  const [teamBattleId, setTeamBattleId] = useState<string | null>(null);
 
   
   const battleListenerUnsubscribe = useRef<() => void | undefined>();
@@ -113,6 +115,7 @@ export default function ArenaPage() {
     setBattleId(null);
     setBattleData(null);
     setTeamLobbyData(null);
+    setTeamBattleId(null);
     hasInitializedCode.current = false;
   }, [cleanupListeners]);
 
@@ -440,27 +443,96 @@ export default function ArenaPage() {
 
 
   const setupTeamLobbyListener = useCallback(async (lobbyName: DifficultyLobby) => {
-    if (!rtdb) return;
+    if (!rtdb || !player) return;
     goOnline(rtdb);
     
     teamLobbyRef.current = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
     
-    // Initial fetch to create the lobby if it doesn't exist
     const snapshot = await get(teamLobbyRef.current);
     if (!snapshot.exists()) {
         await set(teamLobbyRef.current, initialTeamLobbyState);
     }
     
     teamLobbyListenerUnsubscribe.current = onValue(teamLobbyRef.current, (snapshot) => {
-        const data = snapshot.val();
+        const data: TeamLobby | null = snapshot.val();
         if(data){
             setTeamLobbyData(data);
+
+            const blueTeam = Object.values(data.blue).filter(p => p !== null) as TeamLobbyPlayer[];
+            const redTeam = Object.values(data.red).filter(p => p !== null) as TeamLobbyPlayer[];
+            
+            const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
+            const amIInLobby = [...blueTeam, ...redTeam].some(p => p.id === player.id);
+            const shouldIStartMatch = isLobbyFull && amIInLobby && !data.battleId;
+            
+            if (shouldIStartMatch) {
+                // To prevent multiple clients starting the match, only one should do it.
+                // We'll have the client with the lowest sorted player ID do it.
+                const allPlayers = [...blueTeam, ...redTeam].sort((a, b) => a.id.localeCompare(b.id));
+                if (allPlayers[0].id === player.id) {
+                    startTeamBattle(data);
+                }
+            }
+
+            if (data.battleId) {
+                setTeamBattleId(data.battleId);
+                // The lobby is now complete, and a battle is starting. 
+                // We can transition to the game screen.
+                // (Further logic will be needed here to load the team battle)
+                toast({ title: 'Match Starting!', description: 'Your team deathmatch is about to begin.' });
+                setGameState('inTeamGame'); 
+            }
+
         } else {
-             // If the lobby gets deleted, reset to a default state
-            setTeamLobbyData(initialTeamLobbyState);
+             setTeamLobbyData(initialTeamLobbyState);
         }
     });
-  }, []);
+  }, [player]);
+
+  const startTeamBattle = async (finalLobbyData: TeamLobby) => {
+    if (!player || !selectedLobbyName) return;
+
+    try {
+        const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
+        if (!lobby) throw new Error("Lobby configuration not found.");
+        
+        // 1. Generate challenge
+        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: selectedLobbyName });
+
+        // 2. Create the TeamBattle document in Firestore
+        const newTeamBattleRef = doc(collection(db, 'teamBattles'));
+        const teamBattleData: TeamBattle = {
+            id: newTeamBattleRef.id,
+            team1: Object.values(finalLobbyData.blue).filter(p => p !== null) as TeamLobbyPlayer[],
+            team2: Object.values(finalLobbyData.red).filter(p => p !== null) as TeamLobbyPlayer[],
+            team1Score: 0,
+            team2Score: 0,
+            status: 'in-progress',
+            difficulty: selectedLobbyName,
+            wager: lobby.entryFee,
+            question,
+            createdAt: serverTimestamp(),
+        };
+        await setDoc(newTeamBattleRef, teamBattleData);
+
+        // 3. Update the RTDB lobby with the battleId to notify all players
+        const teamLobbyBattleIdRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/battleId`);
+        await set(teamLobbyBattleIdRef, newTeamBattleRef.id);
+        
+        // 4. Clean up the lobby after a short delay
+        setTimeout(() => {
+            if (teamLobbyRef.current) {
+                remove(teamLobbyRef.current);
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error("Error starting team battle:", error);
+        toast({ title: 'Error', description: 'Could not start the team match.', variant: 'destructive' });
+        // Optionally reset state or handle error
+    }
+  };
+
 
   const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => {
       if (!player || !rtdb || !selectedLobbyName) return;
@@ -468,14 +540,21 @@ export default function ArenaPage() {
       const teamSlotRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/${team}/${slot}`);
 
       try {
-        await set(teamSlotRef, { 
-            id: player.id,
-            username: player.username,
-            avatarUrl: player.avatarUrl || '',
-            rating: player.rating
+        await rtdbRunTransaction(teamSlotRef, (currentData) => {
+            if (currentData === null) {
+                return { 
+                    id: player.id,
+                    username: player.username,
+                    avatarUrl: player.avatarUrl || '',
+                    rating: player.rating
+                };
+            } else {
+                // Slot is already taken, so abort the transaction
+                return; 
+            }
         });
       } catch (error) {
-        toast({ title: 'Error Joining Team', description: 'Could not join the team slot. Please try again.', variant: 'destructive'});
+        toast({ title: 'Error Joining Team', description: 'Could not join the team slot. It might have just been taken.', variant: 'destructive'});
         console.error("Error setting team slot:", error);
       }
   };
@@ -489,6 +568,27 @@ export default function ArenaPage() {
         return;
     }
     
+    // Deduct coins immediately for all modes now
+    if (IS_FIREBASE_CONFIGURED) {
+         try {
+            const playerRef = doc(db, "players", player.id);
+            await runTransaction(db, async (transaction) => {
+              const playerDoc = await transaction.get(playerRef);
+              if (!playerDoc.exists() || (playerDoc.data().coins || 0) < lobbyInfo.entryFee) {
+                throw new Error("Insufficient coins.");
+              }
+              const newCoins = (playerDoc.data().coins || 0) - lobbyInfo.entryFee;
+              transaction.update(playerRef, { coins: newCoins });
+            });
+            toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+            toast({ title: "Error Entering Lobby", description: `Failed to deduct coins: ${errorMessage}`, variant: "destructive" });
+            return; // Stop if coins can't be deducted
+        }
+    }
+
+
     if (lobbyInfo.gameMode === '4v4') {
         setSelectedLobbyName(lobbyInfo.name);
         setGameState('formingTeam');
@@ -504,25 +604,7 @@ export default function ArenaPage() {
     setSelectedLobbyName(lobbyInfo.name);
 
     if (IS_FIREBASE_CONFIGURED) {
-      try {
-        const playerRef = doc(db, "players", player.id);
-        await runTransaction(db, async (transaction) => {
-          const playerDoc = await transaction.get(playerRef);
-          if (!playerDoc.exists() || (playerDoc.data().coins || 0) < lobbyInfo.entryFee) {
-            throw new Error("Insufficient coins.");
-          }
-          const newCoins = (playerDoc.data().coins || 0) - lobbyInfo.entryFee;
-          transaction.update(playerRef, { coins: newCoins });
-        });
-        
-        toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
-        await findMatch(lobbyInfo);
-
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-        toast({ title: "Error Entering Lobby", description: `Failed to enter lobby: ${errorMessage}`, variant: "destructive" });
-        resetGameState(true);
-      }
+      await findMatch(lobbyInfo);
     } else {
         startBotMatch(lobbyInfo);
     }
@@ -685,29 +767,36 @@ export default function ArenaPage() {
 
     const currentGameState = gameState; 
     
-    if (currentGameState === 'searching' && selectedLobbyName) {
-        cleanupListeners();
-        if (IS_FIREBASE_CONFIGURED) {
+    // Unified coin refund logic
+    const refundCoins = async () => {
+        if (IS_FIREBASE_CONFIGURED && selectedLobbyName) {
             try {
-                const playerRef = doc(db, "players", player.id);
                 const lobby = LOBBIES.find(l => l.name === selectedLobbyName);
                 if (lobby) {
-                    await runTransaction(db, async (transaction) => {
+                     const playerRef = doc(db, "players", player.id);
+                     await runTransaction(db, async (transaction) => {
                         const playerSnap = await transaction.get(playerRef);
                         if (playerSnap.exists()) {
                             const currentCoins = playerSnap.data().coins || 0;
                             transaction.update(playerRef, { coins: currentCoins + lobby.entryFee });
                         }
                     });
+                    toast({ title: "Fee Refunded", description: `Your entry fee of ${lobby.entryFee} has been returned.`, variant: "default" });
                 }
-                toast({ title: "Search Cancelled", description: `You left the lobby. Your entry fee has been refunded.`, variant: "default" });
-            } catch (error) {
-                 console.error("Error refunding entry fee:", error);
+            } catch(error) {
+                console.error("Error refunding coins:", error);
+                toast({ title: "Refund Error", description: "Could not refund your entry fee.", variant: "destructive" });
             }
         }
+    };
+    
+    if (currentGameState === 'searching') {
+        cleanupListeners();
+        await refundCoins();
         resetGameState(true);
     } 
     else if (currentGameState === 'inGame' && battleData) {
+        // No refund on forfeit
         if (IS_FIREBASE_CONFIGURED) {
             const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
             if (opponent) {
@@ -725,7 +814,10 @@ export default function ArenaPage() {
             setGameState('gameOver');
         }
     } else if (currentGameState === 'formingTeam') {
+        cleanupListeners(); // Includes removing player from team slot if they are in one.
         await handleLeaveLobby();
+        await refundCoins();
+        resetGameState(true);
     }
   };
 
@@ -839,23 +931,31 @@ export default function ArenaPage() {
                 />
             );
         case 'inGame':
-            if (!battleData || !player) {
+        case 'inTeamGame':
+            if (!battleData && !teamBattleId) {
                 return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading match...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
             }
-            return (
-                <DuelView
-                    battleData={battleData}
-                    player={player}
-                    timeRemaining={timeRemaining}
-                    code={code}
-                    onCodeChange={setCode}
-                    language={language}
-                    onLanguageChange={onLanguageChange}
-                    onSubmitCode={handleSubmitCode}
-                    onTimeUp={handleTimeUp}
-                    onForfeit={() => setShowLeaveConfirm(true)}
-                />
-            );
+            if(gameState === 'inTeamGame') {
+                 // Placeholder for team battle view
+                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Team Battle in Progress! (UI not built yet)</p><p>Battle ID: {teamBattleId}</p></div>;
+            }
+            if (battleData && player) {
+              return (
+                  <DuelView
+                      battleData={battleData}
+                      player={player}
+                      timeRemaining={timeRemaining}
+                      code={code}
+                      onCodeChange={setCode}
+                      language={language}
+                      onLanguageChange={onLanguageChange}
+                      onSubmitCode={handleSubmitCode}
+                      onTimeUp={handleTimeUp}
+                      onForfeit={() => setShowLeaveConfirm(true)}
+                  />
+              );
+            }
+            return null;
         case 'submittingComparison':
             return (
                 <div className="flex flex-col items-center justify-center h-full text-center p-4">
@@ -907,11 +1007,13 @@ export default function ArenaPage() {
 export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, type }: { open: boolean, onOpenChange: (open: boolean) => void, onConfirm: () => void, type: 'search' | 'game' | 'lobby' | null }) {
   if (!type) return null;
   const title = type === 'search' ? "Cancel Search?" : type === 'lobby' ? "Leave Lobby?" : "Forfeit Match?";
-  let description = type === 'search' 
-    ? "Are you sure you want to cancel the search? Your entry fee will be refunded." 
-    : type === 'lobby' 
-    ? "Are you sure you want to leave the team formation lobby?"
-    : "Are you sure you want to forfeit? This will count as a loss, and your wager will be lost.";
+  let description = `Are you sure you want to ${type === 'search' ? 'cancel the search' : type === 'lobby' ? 'leave the team formation lobby' : 'forfeit the match'}?`;
+
+  if (type === 'search' || type === 'lobby') {
+    description += " Your entry fee will be refunded.";
+  } else {
+    description += " This will count as a loss, and your wager will be lost.";
+  }
     
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
