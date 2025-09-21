@@ -2,10 +2,10 @@
 "use client";
 
 import React from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Swords, Users, LogOut, Loader2 } from 'lucide-react';
+import { Users, LogOut, Loader2 } from 'lucide-react';
 import type { Player } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -103,4 +103,3 @@ export function TeamFormationLobby({ player, onLeave }: TeamFormationLobbyProps)
         </div>
     );
 }
-
