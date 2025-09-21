@@ -523,6 +523,7 @@ export default function ArenaPage() {
             wager: lobby.entryFee,
             question,
             createdAt: serverTimestamp(),
+            winnerTeam: null,
         };
         await setDoc(newTeamBattleRef, teamBattleData);
 
@@ -812,10 +813,30 @@ export default function ArenaPage() {
             await processGameEnd(finalBattleState);
             setGameState('gameOver');
         }
-    } else if (gameState === 'inTeamGame' && teamBattleData) {
-        // Logic for time up in a team game
+    } else if (gameState === 'inTeamGame' && teamBattleData && teamBattleData.status === 'in-progress') {
         toast({ title: "Time's Up!", description: "The match timer has expired.", variant: "destructive" });
-        // This might involve calculating scores based on submissions so far
+        if (IS_FIREBASE_CONFIGURED) {
+            const battleRef = doc(db, 'teamBattles', teamBattleData.id);
+            const currentBattleState = (await getDoc(battleRef)).data() as TeamBattle;
+
+            if (currentBattleState.status === 'in-progress') {
+                let winner: 'team1' | 'team2' | 'draw' = 'draw';
+                if (currentBattleState.team1Score > currentBattleState.team2Score) {
+                    winner = 'team1';
+                } else if (currentBattleState.team2Score > currentBattleState.team1Score) {
+                    winner = 'team2';
+                }
+                
+                await updateDoc(battleRef, {
+                    status: 'completed',
+                    winnerTeam: winner,
+                });
+                
+                // Here you would transition to a game over screen for teams
+                // For now, we will just log and maybe reset
+                console.log(`Team battle ${teamBattleData.id} ended. Winner: ${winner}`);
+            }
+        }
     }
   };
 
@@ -1136,6 +1157,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
 
 
 
+
+    
 
     
 

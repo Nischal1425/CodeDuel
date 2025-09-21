@@ -76,6 +76,7 @@ export interface TeamBattle {
     wager: number;
     question: GenerateCodingChallengeOutput;
     createdAt: any; // Firestore Timestamp
+    winnerTeam: 'team1' | 'team2' | 'draw' | null;
 }
 
 
@@ -135,5 +136,7 @@ export interface MatchHistoryEntry {
   date: string; 
 }
 
+
+    
 
     
