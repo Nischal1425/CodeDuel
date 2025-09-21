@@ -15,16 +15,18 @@ import { collection, doc, setDoc } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, type AuthError } from 'firebase/auth';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 
 const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 export default function LandingPage() {
   const router = useRouter();
-  const { setPlayerId, isLoading, player } = useAuth();
+  const { isLoading, player } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const { toast } = useToast();
 
   useEffect(() => {
@@ -33,76 +35,75 @@ export default function LandingPage() {
     }
   }, [player, isLoading, router]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleAuthAction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       toast({ title: "Validation Error", description: "Please enter email and password.", variant: "destructive" });
       return;
     }
+    setIsProcessing(true);
 
-    setIsLoggingIn(true);
-    
     if (!IS_FIREBASE_CONFIGURED) {
-      // Mock login for offline mode
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Mock login for offline mode, no real auth happens
       const mockPlayerId = `mock-${email.replace(/@.*/, '')}`;
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // In offline mode, AuthProvider handles creating a mock player
+      // We just need to set the ID and let it take over.
+      const { setPlayerId } = useAuth();
       setPlayerId(mockPlayerId);
       router.push('/dashboard');
-      setIsLoggingIn(false);
+      setIsProcessing(false);
       return;
     }
     
-    try {
+    // --- Firebase Auth Flow ---
+    if (authMode === 'login') {
+      try {
         await signInWithEmailAndPassword(auth, email, password);
         toast({ title: "Login Successful", description: "Welcome back!", className: "bg-green-500 text-white" });
-    } catch (error) {
+        // AuthProvider's onAuthStateChanged will handle the redirect
+      } catch (error) {
         const authError = error as AuthError;
-        // If sign-in fails, it could be a new user or a wrong password.
-        // We'll try to create an account only if the error suggests the user is not found.
-        if (authError.code === 'auth/invalid-credential') {
-             try {
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                const user = userCredential.user;
+        console.error("Login Error: ", authError);
+        toast({ title: "Login Failed", description: "Invalid credentials. Please check your email and password.", variant: "destructive" });
+      }
+    } else { // authMode === 'signup'
+      try {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
 
-                const newPlayer: Omit<Player, 'id'> = {
-                    username: email.split('@')[0] || 'New Duelist',
-                    email: email,
-                    coins: 500, // Starting coins
-                    rank: 1,
-                    rating: 1000, // Starting rating
-                    avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
-                    unlockedAchievements: [],
-                    matchesPlayed: 0,
-                    wins: 0,
-                    losses: 0,
-                    winStreak: 0,
-                    isKycVerified: false,
-                };
-                
-                await setDoc(doc(db, "players", user.uid), newPlayer);
-                toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
-
-            } catch (creationError) {
-                const creationAuthError = creationError as AuthError;
-                let errorMessage = "An error occurred. Please check your credentials and try again.";
-                if (creationAuthError.code === 'auth/weak-password') {
-                    errorMessage = 'The password is too weak. Please use at least 6 characters.';
-                } else {
-                    // If account creation fails for another reason (e.g. email already exists, but initial login failed), it implies a wrong password.
-                    errorMessage = "Incorrect password. Please check your credentials and try again.";
-                }
-
-                console.error("Authentication Error: ", creationAuthError);
-                toast({ title: "Authentication Failed", description: errorMessage, variant: "destructive" });
-            }
-        } else {
-            // Handle other sign-in errors that are not 'auth/invalid-credential'
-            console.error("Authentication Error: ", authError);
-            toast({ title: "Authentication Failed", description: "An unexpected error occurred during login.", variant: "destructive" });
+        const newPlayer: Omit<Player, 'id'> = {
+            username: email.split('@')[0] || 'New Duelist',
+            email: email,
+            coins: 500, // Starting coins
+            rank: 1,
+            rating: 1000, // Starting rating
+            avatarUrl: `https://placehold.co/100x100.png?text=${email.substring(0,1).toUpperCase()}`,
+            unlockedAchievements: [],
+            matchesPlayed: 0,
+            wins: 0,
+            losses: 0,
+            winStreak: 0,
+            isKycVerified: false,
+        };
+        
+        await setDoc(doc(db, "players", user.uid), newPlayer);
+        toast({ title: "Account Created!", description: "Welcome to Code Duel!", className: "bg-green-500 text-white" });
+        // AuthProvider's onAuthStateChanged will handle the redirect
+      } catch (error) {
+        const authError = error as AuthError;
+        let errorMessage = "An error occurred during sign-up.";
+        if (authError.code === 'auth/weak-password') {
+            errorMessage = 'Password should be at least 6 characters.';
+        } else if (authError.code === 'auth/email-already-in-use') {
+            errorMessage = 'This email is already registered. Try logging in instead.';
         }
-    } finally {
-        setIsLoggingIn(false);
+        console.error("Sign-up Error: ", authError);
+        toast({ title: "Sign-up Failed", description: errorMessage, variant: "destructive" });
+      }
     }
+
+    setIsProcessing(false);
   };
 
   if (isLoading || (!isLoading && player)) {
@@ -168,40 +169,51 @@ export default function LandingPage() {
 
         <section id="login-section" className="py-16 bg-background">
           <div className="container mx-auto px-4 max-w-md">
-            <Card className="shadow-2xl border-primary/20">
-              <CardHeader>
-                <CardTitle className="text-2xl text-center text-primary">Join the Battle!</CardTitle>
-                <CardDescription className="text-center text-muted-foreground">
-                  {IS_FIREBASE_CONFIGURED ? "Log in or create an account to start dueling." : "Enter any email/password to play in offline mode."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleLogin} className="space-y-6">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email">Email</Label>
-                    <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required 
-                           className="bg-input/50 focus:border-primary"/>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="password">Password</Label>
-                    <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required 
-                           className="bg-input/50 focus:border-primary"/>
-                  </div>
-                  <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isLoggingIn || !email || !password}>
-                    {isLoggingIn ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {isLoggingIn ? 'Processing...' : 'Login / Sign Up'}
-                  </Button>
-                </form>
-              </CardContent>
-               <CardFooter className="text-xs text-muted-foreground text-center block pt-4">
-                <p>
-                  {IS_FIREBASE_CONFIGURED 
-                    ? "Your password is handled securely by Firebase Authentication." 
-                    : "No Firebase credentials found. The app is in offline mode."
-                  }
-                </p>
-              </CardFooter>
-            </Card>
+             <Card className="shadow-2xl border-primary/20">
+                <Tabs value={authMode} onValueChange={(value) => setAuthMode(value as 'login' | 'signup')} className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="login">Login</TabsTrigger>
+                        <TabsTrigger value="signup">Sign Up</TabsTrigger>
+                    </TabsList>
+                    <form onSubmit={handleAuthAction}>
+                        <CardHeader className="pt-6">
+                            <CardTitle className="text-2xl text-center text-primary">
+                                {authMode === 'login' ? 'Welcome Back!' : 'Join the Battle!'}
+                            </CardTitle>
+                            <CardDescription className="text-center text-muted-foreground">
+                                {IS_FIREBASE_CONFIGURED 
+                                    ? (authMode === 'login' ? "Enter your credentials to log in." : "Create an account to start dueling.")
+                                    : "Enter any email/password to play in offline mode."
+                                }
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="email">Email</Label>
+                                <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required 
+                                    className="bg-input/50 focus:border-primary"/>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="password">Password</Label>
+                                <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required 
+                                    className="bg-input/50 focus:border-primary"/>
+                            </div>
+                        </CardContent>
+                        <CardFooter className="flex flex-col gap-4">
+                           <Button type="submit" className="w-full bg-primary hover:bg-primary/90 text-primary-foreground" disabled={isProcessing || !email || !password}>
+                                {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                                {isProcessing ? 'Processing...' : (authMode === 'login' ? 'Login' : 'Create Account')}
+                            </Button>
+                             <p className="text-xs text-muted-foreground text-center">
+                              {IS_FIREBASE_CONFIGURED 
+                                ? "Your password is handled securely by Firebase Authentication." 
+                                : "No Firebase credentials found. The app is in offline mode."
+                              }
+                            </p>
+                        </CardFooter>
+                    </form>
+                </Tabs>
+             </Card>
           </div>
         </section>
       </main>
