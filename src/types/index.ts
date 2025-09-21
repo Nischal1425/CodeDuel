@@ -4,6 +4,7 @@ import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-c
 import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
 
 export type SupportedLanguage = "javascript" | "python" | "cpp";
+export type GameMode = "1v1" | "4v4";
 
 export interface Player {
   id: string;
@@ -48,6 +49,25 @@ export interface Battle {
   startedAt?: any; // Firestore Timestamp
   winnerId?: string;
   comparisonResult?: CompareCodeSubmissionsOutput;
+}
+
+export interface TeamPlayer extends Player {
+    team: 'red' | 'blue';
+}
+
+export type Team = TeamPlayer[];
+
+export interface TeamBattle {
+    id: string;
+    team1: Team;
+    team2: Team;
+    team1Score: number;
+    team2Score: number;
+    status: 'forming' | 'in-progress' | 'completed';
+    difficulty: 'easy' | 'medium' | 'hard';
+    wager: number;
+    question: GenerateCodingChallengeOutput;
+    createdAt: any; // Firestore Timestamp
 }
 
 

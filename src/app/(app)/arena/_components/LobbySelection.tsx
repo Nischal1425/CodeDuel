@@ -1,10 +1,11 @@
+
 "use client";
 
 import React from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Swords, Coins as CoinsIcon, AlertTriangle } from 'lucide-react';
-import type { Player } from '@/types';
+import { Swords, Coins as CoinsIcon, AlertTriangle, Users } from 'lucide-react';
+import type { Player, GameMode } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 export type DifficultyLobby = 'easy' | 'medium' | 'hard';
@@ -16,16 +17,17 @@ export interface LobbyInfo {
   icon: React.ElementType;
   baseTime: number; // minutes
   entryFee: number;
+  gameMode: GameMode;
 }
 
 interface LobbySelectionProps {
   lobbies: LobbyInfo[];
   player: Player | null;
-  onSelectLobby: (difficulty: DifficultyLobby) => void;
+  onSelectLobby: (lobby: LobbyInfo) => void;
   isFirebaseConfigured: boolean;
 }
 
-function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (difficulty: DifficultyLobby) => void; disabled?: boolean; }) {
+function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (lobby: LobbyInfo) => void; disabled?: boolean; }) {
   return (
     <Card className={`hover:shadow-lg transition-shadow ${disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} flex flex-col`}>
       <CardHeader className="items-center text-center">
@@ -39,10 +41,10 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
       <CardFooter>
         <Button
             className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-            onClick={() => !disabled && onSelectLobby(lobby.name)}
+            onClick={() => !disabled && onSelectLobby(lobby)}
             disabled={disabled}
         >
-          Join {lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)} Lobby
+          Join {lobby.gameMode === '1v1' ? (lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)) : ''} Lobby
         </Button>
       </CardFooter>
     </Card>
@@ -50,6 +52,9 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
 }
 
 export function LobbySelection({ lobbies, player, onSelectLobby, isFirebaseConfigured }: LobbySelectionProps) {
+    const duelLobbies = lobbies.filter(l => l.gameMode === '1v1');
+    const teamLobbies = lobbies.filter(l => l.gameMode === '4v4');
+
     return (
         <div className="container mx-auto py-8 h-full flex flex-col justify-center">
             <Card className="mb-8 shadow-lg">
@@ -58,15 +63,33 @@ export function LobbySelection({ lobbies, player, onSelectLobby, isFirebaseConfi
                 <CardTitle className="text-3xl font-bold">Choose Your Arena</CardTitle>
                 <CardDescription className="text-lg">Select a lobby. Entry fees apply. Current Coins: {player?.coins ?? 0} <CoinsIcon className="inline h-5 w-5 text-yellow-500 align-text-bottom" /></CardDescription>
                 </CardHeader>
-                <CardContent className="grid md:grid-cols-3 gap-6">
-                {lobbies.map(lobby => (
-                    <LobbyCard 
-                        key={lobby.name} 
-                        lobby={lobby} 
-                        onSelectLobby={onSelectLobby} 
-                        disabled={!player || player.coins < lobby.entryFee}
-                    />
-                ))}
+                <CardContent>
+                    <div className="mb-8">
+                        <h3 className="text-xl font-semibold text-center mb-4 border-b pb-2">1v1 Duel Lobbies</h3>
+                        <div className="grid md:grid-cols-3 gap-6">
+                            {duelLobbies.map(lobby => (
+                                <LobbyCard 
+                                    key={lobby.name} 
+                                    lobby={lobby} 
+                                    onSelectLobby={onSelectLobby} 
+                                    disabled={!player || player.coins < lobby.entryFee}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                     <div>
+                        <h3 className="text-xl font-semibold text-center mb-4 border-b pb-2">4v4 Team DeathMatch</h3>
+                         <div className="grid md:grid-cols-3 gap-6">
+                            {teamLobbies.map(lobby => (
+                                <LobbyCard 
+                                    key={lobby.name} 
+                                    lobby={lobby} 
+                                    onSelectLobby={onSelectLobby} 
+                                    disabled={!player || player.coins < lobby.entryFee}
+                                />
+                            ))}
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
             {!isFirebaseConfigured && (

@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, UsersRound, Target, Zap, Sparkles } from 'lucide-react';
+import { Loader2, UsersRound, Target, Zap, Sparkles, Users } from 'lucide-react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
@@ -38,9 +38,10 @@ const COMMISSION_RATE = 0.05; // 5% commission
 type GameState = 'selectingLobby' | 'searching' | 'inGame' | 'submittingComparison' | 'gameOver';
 
 const LOBBIES: LobbyInfo[] = [
-  { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, entryFee: 50 },
-  { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 10, entryFee: 100 },
-  { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, entryFee: 200 },
+  { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, entryFee: 50, gameMode: '1v1' },
+  { name: 'medium', title: 'Balanced Battle', description: 'A solid challenge for most players.', icon: Target, baseTime: 10, entryFee: 100, gameMode: '1v1' },
+  { name: 'hard', title: 'Expert Arena', description: 'Only for the brave and skilled.', icon: Zap, baseTime: 15, entryFee: 200, gameMode: '1v1' },
+  { name: 'medium', title: 'Team DeathMatch', description: '4v4 tactical coding battle.', icon: Users, baseTime: 15, entryFee: 120, gameMode: '4v4' },
 ];
 
 export default function ArenaPage() {
@@ -418,18 +419,22 @@ export default function ArenaPage() {
       }
   }, [player, toast, resetGameState]);
 
-  const handleSelectLobby = async (lobbyName: DifficultyLobby) => {
+  const handleSelectLobby = async (lobbyInfo: LobbyInfo) => {
     if (!player) return;
-    const lobbyInfo = LOBBIES.find(l => l.name === lobbyName);
-    if (!lobbyInfo) return;
 
     if (player.coins < lobbyInfo.entryFee) {
         toast({ title: "Insufficient Coins", description: `You need ${lobbyInfo.entryFee} coins to enter.`, variant: "destructive", action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction> });
         return;
     }
     
+    // Handle Team Deathmatch selection (placeholder for now)
+    if (lobbyInfo.gameMode === '4v4') {
+        toast({ title: "Coming Soon!", description: "4v4 Team DeathMatch is still in development."});
+        return;
+    }
+
     setGameState('searching');
-    setSelectedLobbyName(lobbyName);
+    setSelectedLobbyName(lobbyInfo.name);
 
     if (IS_FIREBASE_CONFIGURED) {
       try {
