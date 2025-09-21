@@ -9,7 +9,7 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { onAuthStateChanged, type User } from 'firebase/auth';
 
 // Determine if Firebase is configured
-const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
 
 interface AuthContextType {
   player: Player | null;
@@ -28,6 +28,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
 
   useEffect(() => {
+    if (!IS_FIREBASE_CONFIGURED) {
+      setIsLoading(false);
+      return;
+    }
     // This listener handles Firebase's auth state and is the single source of truth for login status.
     const unsubscribe = onAuthStateChanged(auth, (user) => {
         setIsLoading(true);
