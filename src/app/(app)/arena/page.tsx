@@ -95,6 +95,7 @@ export default function ArenaPage() {
     setShowLeaveConfirm(false);
     setBattleId(null);
     setBattleData(null);
+    hasInitializedCode.current = false;
   }, [cleanupListeners]);
 
   const showAchievementToast = useCallback((achievement) => {
@@ -261,90 +262,108 @@ export default function ArenaPage() {
 
   const findMatch = useCallback(async (lobby: LobbyInfo) => {
     if (!player || !rtdb) return;
-
     goOnline(rtdb);
 
     const lobbyQueueRef = ref(rtdb, `matchmakingQueue/${lobby.name}`);
-    playerQueueRef.current = child(lobbyQueueRef, player.id);
-
+    
+    // Set up a listener for my battle ID before I enter the queue
     const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
     playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
         const newBattleId = snapshot.val();
         if (newBattleId) {
             setBattleId(newBattleId);
-            remove(playerBattleRef); // Clean up the temporary node
+            remove(playerBattleRef); // Clean up temp node
             if (playerQueueRef.current) {
-                remove(playerQueueRef.current);
+                remove(playerQueueRef.current); // Clean up my queue entry if I was the one who created the match
             }
         }
     });
 
     rtdbRunTransaction(lobbyQueueRef, (queue) => {
-      if (queue === null) {
-        const newQueue = {};
-        newQueue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
-        return newQueue;
-      }
-
-      const opponentId = Object.keys(queue).find(id => id !== player.id);
-      
-      if (opponentId) {
-        // Opponent found, remove them from the queue
-        delete queue[opponentId];
-        
-        (async () => {
-          try {
-            const newBattleId = [player.id, opponentId].sort().join('_') + `_${Date.now()}`;
-            const battleDocRef = doc(db, 'battles', newBattleId);
-
-            const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
-            const opponentDoc = await getDoc(doc(db, 'players', opponentId));
-            if (!opponentDoc.exists()) throw new Error("Opponent data not found in Firestore.");
-            
-            const opponentData = opponentDoc.data() as Player;
-
-            const player1Data = {
-              id: player.id, username: player.username, avatarUrl: player.avatarUrl,
-              language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
-            };
-            const player2Data = {
-              id: opponentId, username: opponentData.username, avatarUrl: opponentData.avatarUrl,
-              language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
-            };
-            
-            const newBattle: Battle = {
-              id: newBattleId,
-              player1: player.id < opponentId ? player1Data : player2Data,
-              player2: player.id < opponentId ? player2Data : player1Data,
-              status: 'in-progress',
-              difficulty: lobby.name,
-              wager: lobby.entryFee,
-              question,
-              createdAt: serverTimestamp(),
-              startedAt: serverTimestamp(),
-            };
-
-            await setDoc(battleDocRef, newBattle);
-            
-            // Notify both players of the battle ID
-            await set(ref(rtdb, `playerBattles/${player.id}`), newBattleId);
-            await set(ref(rtdb, `playerBattles/${opponentId}`), newBattleId);
-
-          } catch (e) {
-            console.error("Failed to create battle:", e);
-            toast({ title: "Match Creation Error", description: "Could not create the match.", variant: "destructive" });
-            resetGameState(true);
-          }
-        })();
-
-        return queue; // Return queue with opponent removed
-      } else {
-        // No opponent found, add current player to the queue
-        if (!queue[player.id]) {
-            queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+        if (queue === null) {
+            queue = {};
         }
-        return queue;
-      }
+
+        // Find an opponent (excluding myself)
+        const opponentId = Object.keys(queue).find(id => id !== player.id);
+
+        if (opponentId) {
+            // Opponent found. Remove them from the queue.
+            // I will NOT add myself to the queue. The battle creation will happen outside the transaction.
+            delete queue[opponentId];
+            
+            // The transaction will return the modified queue and a special value to indicate success.
+            // We pass the opponentId to the transaction's onComplete callback.
+            return queue;
+
+        } else {
+            // No opponent found. Add myself to the queue and wait.
+            queue[player.id] = { joinedAt: rtdbServerTimestamp(), rank: player.rank };
+            playerQueueRef.current = child(lobbyQueueRef, player.id);
+            return queue;
+        }
+    }).then(async (result) => {
+        if (!result.committed) {
+             toast({ title: "Matchmaking Error", description: "Could not join the queue. Please try again.", variant: "destructive"});
+             resetGameState(true);
+             return;
+        }
+        
+        const finalQueue = result.snapshot.val();
+        if (finalQueue && finalQueue[player.id]) {
+            // I was added to the queue, now I'm waiting.
+            return;
+        }
+        
+        // If I'm not in the final queue, it means I was matched.
+        // Find the opponent who is no longer in the queue.
+        const initialQueue = result.snapshot.val(); // The queue before my transaction
+        const opponentId = Object.keys(initialQueue || {}).find(id => !finalQueue || !finalQueue[id]);
+
+        if (opponentId) {
+             try {
+                const newBattleId = [player.id, opponentId].sort().join('_') + `_${Date.now()}`;
+                const battleDocRef = doc(db, 'battles', newBattleId);
+
+                const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobby.name });
+                const opponentDoc = await getDoc(doc(db, 'players', opponentId));
+                if (!opponentDoc.exists()) throw new Error("Opponent data not found.");
+
+                const opponentData = opponentDoc.data() as Player;
+
+                const player1Data = {
+                    id: player.id, username: player.username, avatarUrl: player.avatarUrl,
+                    language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
+                };
+                const player2Data = {
+                    id: opponentId, username: opponentData.username, avatarUrl: opponentData.avatarUrl,
+                    language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false
+                };
+
+                const newBattle: Battle = {
+                    id: newBattleId,
+                    player1: player.id < opponentId ? player1Data : player2Data,
+                    player2: player.id < opponentId ? player2Data : player1Data,
+                    status: 'in-progress',
+                    difficulty: lobby.name,
+                    wager: lobby.entryFee,
+                    question,
+                    createdAt: serverTimestamp(),
+                    startedAt: serverTimestamp(),
+                };
+
+                await setDoc(battleDocRef, newBattle);
+
+                // Notify both players
+                await set(ref(rtdb, `playerBattles/${player.id}`), newBattleId);
+                await set(ref(rtdb, `playerBattles/${opponentId}`), newBattleId);
+
+            } catch (e) {
+                console.error("Failed to create battle:", e);
+                toast({ title: "Match Creation Error", description: "Could not create the match.", variant: "destructive" });
+                resetGameState(true);
+            }
+        }
     });
   }, [player, toast, resetGameState]);
 
@@ -640,8 +659,10 @@ export default function ArenaPage() {
         const initialCode = meInDb?.code || getCodePlaceholder(language, battleData.question);
         const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
 
-        setCode(initialCode);
-        setLanguage(initialLanguage);
+        if(!meInDb?.hasSubmitted) {
+            setCode(initialCode);
+            setLanguage(initialLanguage);
+        }
         hasInitializedCode.current = true;
     }
   }, [battleData, player, language]);
@@ -651,7 +672,6 @@ export default function ArenaPage() {
   useEffect(() => {
     return () => {
         cleanupListeners();
-        hasInitializedCode.current = false;
     }
   }, [cleanupListeners]);
 
@@ -689,7 +709,6 @@ export default function ArenaPage() {
   }
   
   const handleFindNewMatch = () => {
-    hasInitializedCode.current = false;
     resetGameState(true);
   };
 
@@ -808,4 +827,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     
 
     
+
 
