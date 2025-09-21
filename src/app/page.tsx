@@ -123,7 +123,7 @@ export default function LandingPage() {
         if (authError.code === 'auth/weak-password') {
             errorMessage = 'Password should be at least 6 characters.';
         } else if (authError.code === 'auth/email-already-in-use') {
-            errorMessage = 'This email is already registered. Try logging in instead.';
+            errorMessage = 'This email is already registered. Try logging in or use Google Sign-In.';
         }
         console.error("Sign-up Error: ", authError);
         toast({ title: "Sign-up Failed", description: errorMessage, variant: "destructive" });
@@ -174,15 +174,14 @@ export default function LandingPage() {
         if (authError.code === 'auth/popup-closed-by-user') {
             // Silently ignore this error as it's a user action, not a failure.
             console.log("Google Sign-In popup closed by user.");
-            return;
+        } else {
+            console.error("Google Sign-In Error:", authError);
+            toast({
+                title: "Google Sign-In Failed",
+                description: "Could not sign in with Google. Please try again.",
+                variant: "destructive",
+            });
         }
-
-        console.error("Google Sign-In Error:", authError);
-        toast({
-            title: "Google Sign-In Failed",
-            description: "Could not sign in with Google. Please try again.",
-            variant: "destructive",
-        });
     } finally {
         setIsGoogleProcessing(false);
     }
