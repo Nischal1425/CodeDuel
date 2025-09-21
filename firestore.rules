@@ -1,40 +1,31 @@
-{
-  "rules": {
-    "databases": {
-      "{database}": {
-        "documents": {
-          "players": {
-            // Any authenticated user can list players for the leaderboard
-            "allow": ["list"],
-            "if": "request.auth != null"
-          },
-          "players/{userId}": {
-            // A user can create their own player document
-            // A user can only get, update their own document. No one else can.
-            "allow": ["get", "update"],
-            "if": "request.auth.uid == userId"
-          },
-          "battles/{battleId}": {
-            "allow": ["create"],
-            "if": "request.auth.uid != null"
-          },
-          "battles/{battleId}": {
-            // Only players in the battle can read or update it
-            "allow": ["read", "update"],
-            "if": "request.auth.uid == resource.data.player1.id || request.auth.uid == resource.data.player2.id"
-          },
-          "matchHistory/{historyId}": {
-            // A user can create their own match history entry
-            "allow": ["create"],
-            "if": "request.auth.uid != null && request.auth.uid == request.resource.data.playerId"
-          },
-          "matchHistory": {
-            // A user can only list their own match history
-            "allow": ["list"],
-_           "if": "request.auth != null && request.query.filters[0].value == request.auth.uid"
-          }
-        }
-      }
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Players can be read by anyone (for leaderboards), but only the owner can update their own profile.
+    match /players/{userId} {
+      allow create: if request.auth != null;
+      allow get: if request.auth != null;
+      allow list: if request.auth != null;
+      allow update: if request.auth.uid == userId;
+      allow delete: if false; // Do not allow players to be deleted
+    }
+
+    // Only players involved in a battle can read or update it.
+    match /battles/{battleId} {
+      allow create: if request.auth != null;
+      allow read, update: if request.auth.uid == resource.data.player1.id || request.auth.uid == resource.data.player2.id;
+      allow delete: if false; // Do not allow battles to be deleted
+    }
+
+    // Users can only create and read their own match history.
+    match /matchHistory/{historyId} {
+      allow create: if request.auth.uid == request.resource.data.playerId;
+      allow read: if request.auth.uid == resource.data.playerId;
+      // Secure the list query to only allow fetching own history
+      allow list: if request.auth.uid == request.query.filters[0][2];
     }
   }
 }
