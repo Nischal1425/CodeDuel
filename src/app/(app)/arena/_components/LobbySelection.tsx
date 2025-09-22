@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Swords, Coins as CoinsIcon, AlertTriangle, Users } from 'lucide-react';
 import type { Player, GameMode } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { cn } from '@/lib/utils';
 
 export type DifficultyLobby = 'easy' | 'medium' | 'hard';
 
@@ -29,7 +30,7 @@ interface LobbySelectionProps {
 
 function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (lobby: LobbyInfo) => void; disabled?: boolean; }) {
   return (
-    <Card className={`hover:shadow-lg transition-shadow ${disabled ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} flex flex-col`}>
+    <Card className={cn("flex flex-col transition-shadow hover:shadow-lg", disabled ? "opacity-70" : "")}>
       <CardHeader className="items-center text-center">
         <lobby.icon className="h-12 w-12 text-primary mb-3" />
         <CardTitle className="text-2xl">{lobby.title}</CardTitle>
@@ -40,11 +41,11 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
       </CardContent>
       <CardFooter>
         <Button
-            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-            onClick={() => !disabled && onSelectLobby(lobby)}
+            className="w-full"
+            onClick={() => onSelectLobby(lobby)}
             disabled={disabled}
         >
-          Join {lobby.gameMode === '1v1' ? (lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)) : ''} Lobby
+          {disabled ? "Unable to Join" : `Join ${lobby.gameMode === '1v1' ? (lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)) : ''} Lobby`}
         </Button>
       </CardFooter>
     </Card>
