@@ -9,7 +9,7 @@
  */
 
 import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { z } from 'zod';
 import type { EvaluateCodeSubmissionInput, EvaluateCodeSubmissionOutput } from './evaluate-code-submission';
 import { evaluateCodeSubmission } from './evaluate-code-submission';
 import type { TeamBattlePlayer, GenerateCodingChallengeOutput } from '@/types';
