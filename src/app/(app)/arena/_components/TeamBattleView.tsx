@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Swords, User, Flag, Users } from 'lucide-react';
-import type { Player, TeamBattle, SupportedLanguage, TeamLobbyPlayer } from '@/types';
+import { Loader2, Swords, User, Flag, Users, CheckCircle } from 'lucide-react';
+import type { Player, TeamBattle, SupportedLanguage, TeamBattlePlayer } from '@/types';
 import { cn } from '@/lib/utils';
 import { GameTimer } from './GameTimer';
 import { ProblemDisplay } from './ProblemDisplay';
@@ -26,7 +26,7 @@ interface TeamBattleViewProps {
     onForfeit: () => void;
 }
 
-function TeamRoster({ teamName, team, score, color }: { teamName: string, team: TeamLobbyPlayer[], score: number, color: 'blue' | 'red' }) {
+function TeamRoster({ teamName, team, score, color }: { teamName: string, team: TeamBattlePlayer[], score: number, color: 'blue' | 'red' }) {
     return (
         <Card className={cn("border-2", color === 'blue' ? 'border-blue-500' : 'border-red-500')}>
             <CardHeader className={cn("p-3 text-center", color === 'blue' ? 'bg-blue-600' : 'bg-red-600')}>
@@ -38,12 +38,15 @@ function TeamRoster({ teamName, team, score, color }: { teamName: string, team: 
                     <p className="text-xs text-muted-foreground">Score</p>
                 </div>
                 {team.map(p => (
-                    <div key={p.id} className="flex items-center gap-2 p-2 bg-muted/50 rounded-md text-sm">
-                        <Avatar className="h-8 w-8 border">
-                            <AvatarImage src={p.avatarUrl} alt={p.username} data-ai-hint="avatar placeholder" />
-                            <AvatarFallback>{p.username.substring(0, 2).toUpperCase()}</AvatarFallback>
-                        </Avatar>
-                        <span className="font-medium">{p.username}</span>
+                    <div key={p.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-md text-sm">
+                        <div className="flex items-center gap-2">
+                            <Avatar className="h-8 w-8 border">
+                                <AvatarImage src={p.avatarUrl} alt={p.username} data-ai-hint="avatar placeholder" />
+                                <AvatarFallback>{p.username.substring(0, 2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                            <span className="font-medium">{p.username}</span>
+                        </div>
+                        {p.hasSubmitted && <CheckCircle className="h-5 w-5 text-green-500" title="Submitted" />}
                     </div>
                 ))}
             </CardContent>
@@ -68,6 +71,8 @@ export function TeamBattleView({
     // Determine which team the current player is on
     const playerTeam = battleData.team1.some(p => p.id === player.id) ? 'team1' : 'team2';
     const me = playerTeam === 'team1' ? battleData.team1.find(p => p.id === player.id) : battleData.team2.find(p => p.id === player.id);
+
+    const allSubmitted = [...battleData.team1, ...battleData.team2].every(p => p.hasSubmitted);
 
     return (
         <div className="flex flex-col gap-4 h-full p-4 md:p-6">
@@ -104,7 +109,7 @@ export function TeamBattleView({
                     <CardHeader className="bg-card-foreground/5">
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-2"><CardTitle className="text-2xl">Your Solution</CardTitle></div>
-                          <Select value={language} onValueChange={onLanguageChange}>
+                          <Select value={language} onValueChange={onLanguageChange} disabled={me?.hasSubmitted}>
                               <SelectTrigger className="w-[180px] bg-background"><SelectValue placeholder="Select language" /></SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="javascript">JavaScript</SelectItem>
@@ -113,19 +118,22 @@ export function TeamBattleView({
                               </SelectContent>
                           </Select>
                         </div>
+                        {me?.hasSubmitted && <p className="mt-2 text-sm text-blue-600">Your code is submitted. Waiting for other players...</p>}
+                         {allSubmitted && <p className="mt-2 text-sm text-yellow-600 animate-pulse">All players have submitted! Comparing solutions...</p>}
                     </CardHeader>
                     <div className="flex-grow min-h-0">
                         <CodeEditor
                             value={code}
                             onChange={onCodeChange}
                             language={language}
+                            readOnly={me?.hasSubmitted}
                         />
                     </div>
                      <div className="p-4 border-t flex flex-col gap-2">
-                        <Button onClick={onSubmitCode} disabled={!code.trim()} className="w-full">
-                            Submit Code
+                        <Button onClick={onSubmitCode} disabled={me?.hasSubmitted || !code.trim()} className="w-full">
+                             {me?.hasSubmitted ? "Code Submitted" : "Submit Final Code"}
                         </Button>
-                        <Button variant="outline" onClick={onForfeit} className="w-full">
+                        <Button variant="outline" onClick={onForfeit} disabled={me?.hasSubmitted} className="w-full">
                             <Flag className="mr-2 h-4 w-4" /> Forfeit Match
                         </Button>
                      </div>

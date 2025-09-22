@@ -3,6 +3,7 @@
 import type { ElementType } from 'react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
+import { type EvaluateCodeSubmissionOutput } from '@/ai/flows/evaluate-code-submission';
 
 export type SupportedLanguage = "javascript" | "python" | "cpp";
 export type GameMode = "1v1" | "4v4";
@@ -59,6 +60,13 @@ export interface TeamLobbyPlayer {
     rating: number;
 }
 
+export interface TeamBattlePlayer extends TeamLobbyPlayer {
+  language: SupportedLanguage;
+  code: string;
+  hasSubmitted: boolean;
+  evaluation?: EvaluateCodeSubmissionOutput | null;
+}
+
 export interface TeamLobby {
     blue: { [slot: string]: TeamLobbyPlayer | null };
     red: { [slot: string]: TeamLobbyPlayer | null };
@@ -68,11 +76,11 @@ export interface TeamLobby {
 
 export interface TeamBattle {
     id: string;
-    team1: TeamLobbyPlayer[];
-    team2: TeamLobbyPlayer[];
+    team1: TeamBattlePlayer[];
+    team2: TeamBattlePlayer[];
     team1Score: number;
     team2Score: number;
-    status: 'in-progress' | 'completed';
+    status: 'in-progress' | 'comparing' | 'completed';
     difficulty: 'easy' | 'medium' | 'hard';
     wager: number;
     question: GenerateCodingChallengeOutput;

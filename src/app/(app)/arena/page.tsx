@@ -12,10 +12,10 @@ import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-c
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
-import { evaluateCodeSubmission } from '@/ai/flows/evaluate-code-submission';
+import { compareTeamSubmissions } from '@/ai/flows/compare-team-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamLobbyPlayer } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamBattlePlayer } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
@@ -38,7 +38,6 @@ const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!r
 
 const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
-const TEAM_SUBMISSION_POINTS = 100; // Points for a correct team submission
 
 type GameState = 'selectingLobby' | 'searching' | 'formingTeam' | 'inGame' | 'inTeamGame' | 'submittingComparison' | 'gameOver';
 
@@ -368,6 +367,32 @@ export default function ArenaPage() {
     }
   }, [player, toast, processGameEnd]);
 
+  const handleTeamSubmissionFinalization = useCallback(async (currentBattle: TeamBattle) => {
+    if (!player || !IS_FIREBASE_CONFIGURED) return;
+    
+    try {
+        const result = await compareTeamSubmissions({
+            team1: currentBattle.team1,
+            team2: currentBattle.team2,
+            question: currentBattle.question,
+        });
+
+        await updateDoc(doc(db, 'teamBattles', currentBattle.id), {
+            team1: result.team1,
+            team2: result.team2,
+            team1Score: result.team1Score,
+            team2Score: result.team2Score,
+            winnerTeam: result.winnerTeam,
+            status: 'completed',
+        });
+
+    } catch (error) {
+        console.error("Error during team submission comparison:", error);
+        toast({ title: "Comparison Error", description: "Could not compare team submissions.", variant: "destructive" });
+        await updateDoc(doc(db, 'teamBattles', currentBattle.id), { status: 'completed' });
+    }
+  }, [player, toast]);
+
 
   const findMatch = useCallback(async (lobby: LobbyInfo) => {
     if (!player || !rtdb) return;
@@ -541,10 +566,18 @@ export default function ArenaPage() {
 
         // 2. Create the TeamBattle document in Firestore
         const newTeamBattleRef = doc(collection(db, 'teamBattles'));
+
+        const createTeamBattlePlayer = (lobbyPlayer: TeamLobbyPlayer): TeamBattlePlayer => ({
+            ...lobbyPlayer,
+            language: DEFAULT_LANGUAGE,
+            code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
+            hasSubmitted: false,
+        });
+
         const teamBattleData: TeamBattle = {
             id: newTeamBattleRef.id,
-            team1: Object.values(finalLobbyData.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[],
-            team2: Object.values(finalLobbyData.red || {}).filter(p => p !== null) as TeamLobbyPlayer[],
+            team1: Object.values(finalLobbyData.blue || {}).filter(p => p !== null).map(p => createTeamBattlePlayer(p!)),
+            team2: Object.values(finalLobbyData.red || {}).filter(p => p !== null).map(p => createTeamBattlePlayer(p!)),
             team1Score: 0,
             team2Score: 0,
             status: 'in-progress',
@@ -591,13 +624,13 @@ export default function ArenaPage() {
         if(data){
             setTeamLobbyData(data);
 
-            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[];
-            const redTeam = Object.values(data.red || {}).filter(p => p !== null) as TeamLobbyPlayer[];
+            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null);
+            const redTeam = Object.values(data.red || {}).filter(p => p !== null);
             
             const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
             const amIInLobby = [...blueTeam, ...redTeam].some(p => p?.id === player.id);
             const shouldStartMatch = isLobbyFull && amIInLobby && data.status === 'waiting';
-
+            
             if (shouldStartMatch) {
                 // Use a transaction to ensure only one client starts the match.
                 const lobbyStatusRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/status`);
@@ -780,12 +813,21 @@ export default function ArenaPage() {
     
     const teamBattleDocRef = doc(db, 'teamBattles', teamBattleId);
     
-    teamBattleListenerUnsubscribe.current = onSnapshot(teamBattleDocRef, (docSnap) => {
+    teamBattleListenerUnsubscribe.current = onSnapshot(teamBattleDocRef, async (docSnap) => {
         if (docSnap.exists()) {
             const data = { id: docSnap.id, ...docSnap.data() } as TeamBattle;
             setTeamBattleData(data);
             
-            if (data.status === 'completed' && gameState === 'inTeamGame') {
+            const allPlayersSubmitted = [...data.team1, ...data.team2].every(p => p.hasSubmitted);
+
+            if (data.status === 'in-progress' && allPlayersSubmitted) {
+                 if (player?.id === data.team1[0].id) { // Only one player triggers the comparison
+                    await updateDoc(docSnap.ref, { status: 'comparing' });
+                    await handleTeamSubmissionFinalization(data);
+                 }
+            }
+
+            if (data.status === 'completed' && gameState !== 'gameOver') {
                 processTeamGameEnd(data);
             }
 
@@ -802,7 +844,7 @@ export default function ArenaPage() {
             teamBattleListenerUnsubscribe.current();
         }
     }
-  }, [teamBattleId, player, gameState, resetGameState, toast, processTeamGameEnd]);
+  }, [teamBattleId, player, gameState, resetGameState, toast, processTeamGameEnd, handleTeamSubmissionFinalization]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -845,35 +887,25 @@ export default function ArenaPage() {
             await handleSubmissionFinalization(finalBattleState);
         }
     } else if (gameState === 'inTeamGame' && teamBattleData) {
-        try {
-            const evalResult = await evaluateCodeSubmission({
-                playerCode: code,
-                language: language,
-                problemStatement: teamBattleData.question.problemStatement,
-                referenceSolution: teamBattleData.question.solution,
-                difficulty: teamBattleData.difficulty,
-            });
-
-            if (evalResult.isPotentiallyCorrect) {
-                toast({ title: "Correct Submission!", description: `Your team gains ${TEAM_SUBMISSION_POINTS} points!`, className: "bg-green-500 text-white" });
-
-                if (IS_FIREBASE_CONFIGURED) {
-                    const teamBattleRef = doc(db, 'teamBattles', teamBattleData.id);
-                    const playerIsOnTeam1 = teamBattleData.team1.some(p => p.id === player.id);
-                    const scoreField = playerIsOnTeam1 ? 'team1Score' : 'team2Score';
-                    
-                    await updateDoc(teamBattleRef, {
-                        [scoreField]: increment(TEAM_SUBMISSION_POINTS)
-                    });
-                }
-                // TODO: Disable further submissions from this player to prevent spamming points.
-            } else {
-                toast({ title: "Incorrect Solution", description: "Your code didn't pass the evaluation. Try again!", variant: "destructive" });
-            }
-        } catch (error) {
-            console.error("Error evaluating team submission:", error);
-            toast({ title: "Evaluation Error", description: "Could not evaluate your code. Please try again.", variant: "destructive" });
+        if (!IS_FIREBASE_CONFIGURED) {
+             toast({ title: "Offline Mode", description: "Team battles are not supported in offline mode.", variant: "destructive" });
+             return;
         }
+
+        const playerTeamKey = teamBattleData.team1.some(p => p.id === player.id) ? 'team1' : 'team2';
+        const playerIndex = teamBattleData[playerTeamKey].findIndex(p => p.id === player.id);
+        
+        if (playerIndex === -1 || teamBattleData[playerTeamKey][playerIndex].hasSubmitted) return;
+
+        toast({ title: "Code Submitted!", description: "Your solution is locked in for the team battle.", className: "bg-primary text-primary-foreground" });
+        
+        const teamBattleRef = doc(db, 'teamBattles', teamBattleData.id);
+        const updatePayload = {
+            [`${playerTeamKey}.${playerIndex}.code`]: code,
+            [`${playerTeamKey}.${playerIndex}.language`]: language,
+            [`${playerTeamKey}.${playerIndex}.hasSubmitted`]: true,
+        };
+        await updateDoc(teamBattleRef, updatePayload);
     }
   };
 
@@ -898,23 +930,11 @@ export default function ArenaPage() {
             setGameState('gameOver');
         }
     } else if (gameState === 'inTeamGame' && teamBattleData && teamBattleData.status === 'in-progress') {
-        toast({ title: "Time's Up!", description: "The match timer has expired.", variant: "destructive" });
-        if (IS_FIREBASE_CONFIGURED) {
-            const battleRef = doc(db, 'teamBattles', teamBattleData.id);
-            // Use a transaction to prevent multiple players from ending the match.
-            await runTransaction(db, async (transaction) => {
-                const freshBattleDoc = await transaction.get(battleRef);
-                if (freshBattleDoc.exists() && freshBattleDoc.data().status === 'in-progress') {
-                    const currentBattleState = freshBattleDoc.data() as TeamBattle;
-                    let winner: 'team1' | 'team2' | 'draw' = 'draw';
-                    if (currentBattleState.team1Score > currentBattleState.team2Score) {
-                        winner = 'team1';
-                    } else if (currentBattleState.team2Score > currentBattleState.team1Score) {
-                        winner = 'team2';
-                    }
-                    transaction.update(battleRef, { status: 'completed', winnerTeam: winner });
-                }
-            });
+        toast({ title: "Time's Up!", description: "The match timer has expired. Comparing submissions...", variant: "destructive" });
+        if (IS_FIREBASE_CONFIGURED && player.id === teamBattleData.team1[0].id) {
+             const battleRef = doc(db, 'teamBattles', teamBattleData.id);
+             await updateDoc(battleRef, { status: 'comparing' });
+             await handleTeamSubmissionFinalization(teamBattleData);
         }
     }
   };
@@ -1027,16 +1047,26 @@ export default function ArenaPage() {
     if ((battleData?.question || teamBattleData?.question) && player && !hasInitializedCode.current) {
         const question = battleData?.question || teamBattleData?.question;
         
-        // This part is for 1v1, it needs to be adapted for team battles if code is stored per player
-        const meInDb = battleData ? (battleData.player1.id === player.id ? battleData.player1 : battleData.player2) : null;
-        
-        const initialCode = meInDb?.code || getCodePlaceholder(language, question);
-        const initialLanguage = meInDb?.language || DEFAULT_LANGUAGE;
+        let initialCode = getCodePlaceholder(language, question);
+        let initialLanguage = DEFAULT_LANGUAGE;
 
-        if(!meInDb?.hasSubmitted) {
-            setCode(initialCode);
-            setLanguage(initialLanguage);
+        if (battleData) {
+            const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
+            if (meInDb && !meInDb.hasSubmitted) {
+                initialCode = meInDb.code || initialCode;
+                initialLanguage = meInDb.language || initialLanguage;
+            }
+        } else if (teamBattleData) {
+            const team = teamBattleData.team1.find(p => p.id === player.id) ? 'team1' : 'team2';
+            const meInDb = teamBattleData[team].find(p => p.id === player.id);
+            if (meInDb && !meInDb.hasSubmitted) {
+                initialCode = meInDb.code || initialCode;
+                initialLanguage = meInDb.language || initialLanguage;
+            }
         }
+
+        setCode(initialCode);
+        setLanguage(initialLanguage);
         hasInitializedCode.current = true;
     }
   }, [battleData, teamBattleData, player, language]);
@@ -1052,12 +1082,12 @@ export default function ArenaPage() {
 
   const onLanguageChange = async (newLang: SupportedLanguage) => {
     if (!player) return;
-    setLanguage(newLang);
     const question = battleData?.question || teamBattleData?.question;
     const newCode = getCodePlaceholder(newLang, question);
     setCode(newCode);
+    setLanguage(newLang);
 
-    if (IS_FIREBASE_CONFIGURED && gameState === 'inGame' && battleData?.id && battleData.status !== 'waiting') {
+    if (IS_FIREBASE_CONFIGURED && battleData?.id && battleData.status !== 'waiting') {
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
         if (playerKey === 'player2' && !battleData.player2) return;
 
@@ -1065,22 +1095,8 @@ export default function ArenaPage() {
             [`${playerKey}.language`]: newLang,
             [`${playerKey}.code`]: newCode,
         });
-    } else if (!IS_FIREBASE_CONFIGURED && gameState === 'inGame' && battleData) {
-        const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
-        if (!playerKey || !battleData[playerKey]) return;
-        setBattleData(currentBattle => {
-            if (!currentBattle) return null;
-            return {
-                ...currentBattle,
-                [playerKey]: { 
-                    ...currentBattle[playerKey]!, 
-                    language: newLang,
-                    code: newCode,
-                }
-            };
-        });
     }
-    // TODO: Add logic for language change in team battles if needed
+    // No language change persistence needed for team battles until submission
   }
   
   const handleFindNewMatch = () => {
