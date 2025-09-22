@@ -543,8 +543,8 @@ export default function ArenaPage() {
         const newTeamBattleRef = doc(collection(db, 'teamBattles'));
         const teamBattleData: TeamBattle = {
             id: newTeamBattleRef.id,
-            team1: Object.values(finalLobbyData.blue).filter(p => p !== null) as TeamLobbyPlayer[],
-            team2: Object.values(finalLobbyData.red).filter(p => p !== null) as TeamLobbyPlayer[],
+            team1: Object.values(finalLobbyData.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[],
+            team2: Object.values(finalLobbyData.red || {}).filter(p => p !== null) as TeamLobbyPlayer[],
             team1Score: 0,
             team2Score: 0,
             status: 'in-progress',
@@ -599,10 +599,10 @@ export default function ArenaPage() {
             const shouldIStartMatch = isLobbyFull && amIInLobby && !data.battleId;
             
             if (shouldIStartMatch) {
-                // To prevent multiple clients starting the match, only one should do it.
+                // To prevent multiple clients from starting the match, only one should do it.
                 // We'll have the client with the lowest sorted player ID do it.
                 const allPlayers = [...blueTeam, ...redTeam].sort((a, b) => a.id.localeCompare(b.id));
-                if (allPlayers[0].id === player.id) {
+                if (allPlayers[0]?.id === player.id) {
                     startTeamBattle(data);
                 }
             }
