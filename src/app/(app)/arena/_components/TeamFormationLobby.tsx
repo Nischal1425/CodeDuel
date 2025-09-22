@@ -78,8 +78,8 @@ export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: T
     }
     
     const allPlayersInLobby = [
-        ...Object.values(lobbyData.blue),
-        ...Object.values(lobbyData.red)
+        ...Object.values(lobbyData.blue || {}),
+        ...Object.values(lobbyData.red || {})
     ].filter(p => p !== null);
 
     const isPlayerInLobby = allPlayersInLobby.some(p => p?.id === player.id);
@@ -95,8 +95,8 @@ export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: T
                 </CardHeader>
                 <CardContent className="mt-6">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <TeamCard teamName="Blue" teamData={lobbyData.blue} onJoin={onJoinTeam} disabled={isPlayerInLobby}/>
-                        <TeamCard teamName="Red" teamData={lobbyData.red} onJoin={onJoinTeam} disabled={isPlayerInLobby}/>
+                        <TeamCard teamName="Blue" teamData={lobbyData.blue || {}} onJoin={onJoinTeam} disabled={isPlayerInLobby}/>
+                        <TeamCard teamName="Red" teamData={lobbyData.red || {}} onJoin={onJoinTeam} disabled={isPlayerInLobby}/>
                     </div>
                 </CardContent>
                 <CardFooter className="flex-col gap-4">
