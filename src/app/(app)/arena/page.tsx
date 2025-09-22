@@ -15,7 +15,7 @@ import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
 import { compareTeamSubmissions } from '@/ai/flows/compare-team-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamBattlePlayer } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamBattlePlayer, TeamLobbyPlayer } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
@@ -624,11 +624,11 @@ export default function ArenaPage() {
         if(data){
             setTeamLobbyData(data);
 
-            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null);
-            const redTeam = Object.values(data.red || {}).filter(p => p !== null);
+            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[];
+            const redTeam = Object.values(data.red || {}).filter(p => p !== null) as TeamLobbyPlayer[];
             
             const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
-            const amIInLobby = [...blueTeam, ...redTeam].some(p => p?.id === player.id);
+            const amIInLobby = [...blueTeam, ...redTeam].some(p => p.id === player.id);
             const shouldStartMatch = isLobbyFull && amIInLobby && data.status === 'waiting';
             
             if (shouldStartMatch) {
@@ -1252,5 +1252,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
 }
 
 
+
+    
 
     
