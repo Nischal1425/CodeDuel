@@ -72,6 +72,7 @@ export interface TeamLobby {
     red: { [slot: string]: TeamLobbyPlayer | null };
     battleId: string | null;
     status: 'waiting' | 'starting';
+    battlesCreated?: boolean;
 }
 
 export interface TeamBattle {
@@ -145,6 +146,8 @@ export interface MatchHistoryEntry {
   date: string; 
 }
 
+
+    
 
     
 
