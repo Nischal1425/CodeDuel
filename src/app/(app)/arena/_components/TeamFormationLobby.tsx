@@ -6,7 +6,7 @@ import React from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Users, LogOut, Loader2 } from 'lucide-react';
+import { Users, LogOut, Loader2, Bot } from 'lucide-react';
 import type { Player, TeamLobby } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,7 @@ interface TeamFormationLobbyProps {
   lobbyData: TeamLobby;
   onJoinTeam: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void;
   onLeave: () => void;
+  onFillWithBots: () => void;
 }
 
 const SLOTS: ('1' | '2' | '3' | '4')[] = ['1', '2', '3', '4'];
@@ -68,7 +69,7 @@ function TeamCard({ teamName, teamData, onJoin, disabled }: { teamName: 'Blue' |
 }
 
 
-export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: TeamFormationLobbyProps) {
+export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave, onFillWithBots }: TeamFormationLobbyProps) {
     if (!player || !lobbyData) {
         return (
             <div className="flex flex-col items-center justify-center h-full p-4">
@@ -84,6 +85,7 @@ export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: T
 
     const isPlayerInLobby = allPlayersInLobby.some(p => p?.id === player.id);
     const totalPlayers = allPlayersInLobby.length;
+    const isLobbyFull = totalPlayers === 8;
 
     return (
         <div className="container mx-auto py-8 h-full flex flex-col justify-center">
@@ -100,15 +102,19 @@ export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave }: T
                     </div>
                 </CardContent>
                 <CardFooter className="flex-col gap-4">
-                    <p className="text-sm text-muted-foreground">Waiting for more players... ({totalPlayers}/8)</p>
-                    <Button variant="outline" onClick={onLeave}>
-                        <LogOut className="mr-2 h-4 w-4" /> Leave Lobby
-                    </Button>
+                    <p className="text-sm text-muted-foreground">
+                        {isLobbyFull ? "Lobby is full! Starting match..." : `Waiting for more players... (${totalPlayers}/8)`}
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-4">
+                        <Button variant="outline" onClick={onLeave}>
+                            <LogOut className="mr-2 h-4 w-4" /> Leave Lobby
+                        </Button>
+                        <Button variant="secondary" onClick={onFillWithBots} disabled={isLobbyFull}>
+                            <Bot className="mr-2 h-4 w-4" /> Fill with Bots (Dev)
+                        </Button>
+                    </div>
                 </CardFooter>
             </Card>
         </div>
     );
 }
-
-
-    

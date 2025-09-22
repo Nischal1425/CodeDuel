@@ -687,6 +687,43 @@ export default function ArenaPage() {
         console.error("Error setting team slot:", error);
       }
   };
+
+    const handleFillWithBots = async () => {
+    if (!rtdb || !selectedLobbyName || !teamLobbyData) return;
+
+    const botNames = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"];
+    let botIndex = 0;
+
+    const newLobbyData = JSON.parse(JSON.stringify(teamLobbyData));
+    
+    const teams: ('blue' | 'red')[] = ['blue', 'red'];
+    const slots: ('1' | '2' | '3' | '4')[] = ['1', '2', '3', '4'];
+
+    for (const team of teams) {
+        for (const slot of slots) {
+            if (!newLobbyData[team][slot]) {
+                if (botIndex >= botNames.length) break;
+                
+                const botName = `Bot ${botNames[botIndex]}`;
+                newLobbyData[team][slot] = {
+                    id: `bot_${botNames[botIndex].toLowerCase()}`,
+                    username: botName,
+                    avatarUrl: `https://placehold.co/100x100.png?text=${botNames[botIndex][0]}`,
+                    rating: 1000 + Math.floor(Math.random() * 500)
+                };
+                botIndex++;
+            }
+        }
+    }
+
+    try {
+      await set(ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}`), newLobbyData);
+      toast({ title: "Bots Deployed!", description: "Lobby filled with bots. Match should start shortly." });
+    } catch (error) {
+      console.error("Error filling lobby with bots:", error);
+      toast({ title: "Error", description: "Could not add bots to the lobby.", variant: "destructive" });
+    }
+  };
   
 
   const handleSelectLobby = async (lobbyInfo: LobbyInfo) => {
@@ -1132,6 +1169,7 @@ export default function ArenaPage() {
                     lobbyData={teamLobbyData}
                     onJoinTeam={handleJoinTeam}
                     onLeave={() => setShowLeaveConfirm(true)}
+                    onFillWithBots={handleFillWithBots}
                 />
             );
         case 'inGame':
