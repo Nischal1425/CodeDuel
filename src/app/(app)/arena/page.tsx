@@ -51,7 +51,6 @@ const LOBBIES: LobbyInfo[] = [
 const initialTeamLobbyState: TeamLobby = {
     blue: { '1': null, '2': null, '3': null, '4': null },
     red: { '1': null, '2': null, '3': null, '4': null },
-    battleId: null,
     status: 'waiting',
 };
 
@@ -556,8 +555,7 @@ export default function ArenaPage() {
         const redTeam = Object.values(finalLobbyData.red || {}).filter((p): p is TeamLobbyPlayer => p !== null);
 
         const battleCreationPromises = [];
-        const allPlayerIdsInLobby = [...blueTeam, ...redTeam].map(p => p.id);
-
+        
         for (let i = 0; i < 4; i++) {
             const player1 = blueTeam[i];
             const player2 = redTeam[i];
@@ -593,7 +591,7 @@ export default function ArenaPage() {
                 
                 await setDoc(battleDocRef, newBattle);
                 
-                // Notify both players
+                // Notify both players of their specific battle
                 await set(ref(rtdb, `playerBattles/${player1.id}`), battleId);
                 await set(ref(rtdb, `playerBattles/${player2.id}`), battleId);
             })();
@@ -601,19 +599,6 @@ export default function ArenaPage() {
         }
 
         await Promise.all(battleCreationPromises);
-
-        // Notify all players to switch view. The individual playerBattle listener will handle picking up the ID.
-        // We set a flag to indicate battles are created.
-        const lobbyBattlesCreatedRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/battlesCreated`);
-        await set(lobbyBattlesCreatedRef, true);
-        
-        // Clean up lobby after a delay
-        setTimeout(() => {
-            if (teamLobbyRef.current) {
-                remove(teamLobbyRef.current);
-                teamLobbyRef.current = null;
-            }
-        }, 5000);
 
     } catch (error) {
         console.error("Error starting team duels:", error);
@@ -647,38 +632,29 @@ export default function ArenaPage() {
                 const lobbyStatusRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/status`);
                 rtdbRunTransaction(lobbyStatusRef, (currentStatus) => {
                     if (currentStatus === 'waiting') return 'starting';
-                    return; // Abort
+                    return; // Abort transaction if status is not 'waiting'
                 }).then(({ committed }) => {
+                    // Only the player who successfully commits the transaction will start the battle
                     if (committed) {
                         startTeamBattle(data);
                     }
                 });
-            }
-
-            if (data.battlesCreated) {
-                const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
-                if (lobby) setTimeRemaining(lobby.baseTime * 60);
-                
-                // The playerBattle listener will now pick up the specific battle ID
-                // and transition the state to 'inGame'.
             }
         } else {
              setTeamLobbyData(initialTeamLobbyState);
         }
     });
 
-    // Also set up the individual playerBattle listener here
-     const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
-     playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
+    // Also set up the individual playerBattle listener here to catch the new battle ID
+    playerBattleListenerUnsubscribe.current = onValue(ref(rtdb, `playerBattles/${player.id}`), (snapshot) => {
         const newBattleId = snapshot.val();
         if (newBattleId) {
             setBattleId(newBattleId);
-            remove(playerBattleRef); 
+            remove(ref(rtdb, `playerBattles/${player.id}`)); // Clean up the notification node
         }
     });
 
-
-  }, [player, selectedLobbyName, startTeamBattle, toast]);
+  }, [player, startTeamBattle]);
 
 
   const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => {

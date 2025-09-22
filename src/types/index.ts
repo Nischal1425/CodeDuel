@@ -1,5 +1,6 @@
 
 
+
 import type { ElementType } from 'react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
@@ -70,9 +71,7 @@ export interface TeamBattlePlayer extends TeamLobbyPlayer {
 export interface TeamLobby {
     blue: { [slot: string]: TeamLobbyPlayer | null };
     red: { [slot: string]: TeamLobbyPlayer | null };
-    battleId: string | null;
     status: 'waiting' | 'starting';
-    battlesCreated?: boolean;
 }
 
 export interface TeamBattle {
