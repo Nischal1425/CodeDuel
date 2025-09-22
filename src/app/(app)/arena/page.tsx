@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, UsersRound, Target, Zap, Sparkles, Users } from 'lucide-react';
+import { Loader2, UsersRound, Target, Zap, Sparkles, Users, Bot } from 'lucide-react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
@@ -698,6 +698,10 @@ export default function ArenaPage() {
     
     const teams: ('blue' | 'red')[] = ['blue', 'red'];
     const slots: ('1' | '2' | '3' | '4')[] = ['1', '2', '3', '4'];
+    
+    // Ensure team objects exist
+    if (!newLobbyData.blue) newLobbyData.blue = {};
+    if (!newLobbyData.red) newLobbyData.red = {};
 
     for (const team of teams) {
         for (const slot of slots) {
@@ -1294,3 +1298,4 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     
 
     
+
