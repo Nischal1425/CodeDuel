@@ -305,13 +305,12 @@ export default function ArenaPage() {
     toast({ title: toastTitle, description: toastDesc, variant: toastVariant, duration: 7000 });
     achievementResult.newlyUnlocked.forEach(showAchievementToast);
     
-    // Set game state to gameOver instead of resetting, to show the report screen
     setGameState('gameOver');
 
     setTimeout(() => {
         sessionStorage.removeItem(hasProcessedKey);
     }, 3000);
- }, [player, toast, showAchievementToast, resetGameState]);
+ }, [player, toast, showAchievementToast]);
 
 
  const handleSubmissionFinalization = useCallback(async (currentBattle: Battle) => {
@@ -530,6 +529,52 @@ export default function ArenaPage() {
   }, [player, toast, resetGameState]);
 
 
+  const startTeamBattle = useCallback(async (finalLobbyData: TeamLobby) => {
+    if (!player || !selectedLobbyName) return;
+
+    try {
+        const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
+        if (!lobby) throw new Error("Lobby configuration not found.");
+        
+        // 1. Generate challenge
+        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: selectedLobbyName });
+
+        // 2. Create the TeamBattle document in Firestore
+        const newTeamBattleRef = doc(collection(db, 'teamBattles'));
+        const teamBattleData: TeamBattle = {
+            id: newTeamBattleRef.id,
+            team1: Object.values(finalLobbyData.blue).filter(p => p !== null) as TeamLobbyPlayer[],
+            team2: Object.values(finalLobbyData.red).filter(p => p !== null) as TeamLobbyPlayer[],
+            team1Score: 0,
+            team2Score: 0,
+            status: 'in-progress',
+            difficulty: selectedLobbyName,
+            wager: lobby.entryFee,
+            question,
+            createdAt: serverTimestamp(),
+            winnerTeam: null,
+        };
+        await setDoc(newTeamBattleRef, teamBattleData);
+
+        // 3. Update the RTDB lobby with the battleId to notify all players
+        const teamLobbyBattleIdRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/battleId`);
+        await set(teamLobbyBattleIdRef, newTeamBattleRef.id);
+        
+        // 4. Clean up the lobby after a short delay
+        setTimeout(() => {
+            if (teamLobbyRef.current) {
+                remove(teamLobbyRef.current);
+                teamLobbyRef.current = null;
+            }
+        }, 5000);
+
+    } catch (error) {
+        console.error("Error starting team battle:", error);
+        toast({ title: 'Error', description: 'Could not start the team match.', variant: 'destructive' });
+        // Optionally reset state or handle error
+    }
+  }, [player, selectedLobbyName, toast]);
+
   const setupTeamLobbyListener = useCallback(async (lobbyName: DifficultyLobby) => {
     if (!rtdb || !player) return;
     goOnline(rtdb);
@@ -576,52 +621,6 @@ export default function ArenaPage() {
         }
     });
   }, [player, selectedLobbyName, startTeamBattle, toast]);
-
-  const startTeamBattle = async (finalLobbyData: TeamLobby) => {
-    if (!player || !selectedLobbyName) return;
-
-    try {
-        const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
-        if (!lobby) throw new Error("Lobby configuration not found.");
-        
-        // 1. Generate challenge
-        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: selectedLobbyName });
-
-        // 2. Create the TeamBattle document in Firestore
-        const newTeamBattleRef = doc(collection(db, 'teamBattles'));
-        const teamBattleData: TeamBattle = {
-            id: newTeamBattleRef.id,
-            team1: Object.values(finalLobbyData.blue).filter(p => p !== null) as TeamLobbyPlayer[],
-            team2: Object.values(finalLobbyData.red).filter(p => p !== null) as TeamLobbyPlayer[],
-            team1Score: 0,
-            team2Score: 0,
-            status: 'in-progress',
-            difficulty: selectedLobbyName,
-            wager: lobby.entryFee,
-            question,
-            createdAt: serverTimestamp(),
-            winnerTeam: null,
-        };
-        await setDoc(newTeamBattleRef, teamBattleData);
-
-        // 3. Update the RTDB lobby with the battleId to notify all players
-        const teamLobbyBattleIdRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/battleId`);
-        await set(teamLobbyBattleIdRef, newTeamBattleRef.id);
-        
-        // 4. Clean up the lobby after a short delay
-        setTimeout(() => {
-            if (teamLobbyRef.current) {
-                remove(teamLobbyRef.current);
-                teamLobbyRef.current = null;
-            }
-        }, 5000);
-
-    } catch (error) {
-        console.error("Error starting team battle:", error);
-        toast({ title: 'Error', description: 'Could not start the team match.', variant: 'destructive' });
-        // Optionally reset state or handle error
-    }
-  };
 
 
   const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => {
@@ -1170,7 +1169,7 @@ export default function ArenaPage() {
             }
             return (
                 <GameOverReport
-                    battleData={battleData!}
+                    battleData={battleData}
                     teamBattleData={teamBattleData}
                     player={player}
                     onFindNewMatch={handleFindNewMatch}
@@ -1229,3 +1228,6 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
   );
 }
 
+
+
+    
