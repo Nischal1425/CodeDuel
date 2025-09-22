@@ -53,6 +53,7 @@ const initialTeamLobbyState: TeamLobby = {
     blue: { '1': null, '2': null, '3': null, '4': null },
     red: { '1': null, '2': null, '3': null, '4': null },
     battleId: null,
+    status: 'waiting',
 };
 
 
@@ -528,7 +529,6 @@ export default function ArenaPage() {
       }
   }, [player, toast, resetGameState]);
 
-
   const startTeamBattle = useCallback(async (finalLobbyData: TeamLobby) => {
     if (!player || !selectedLobbyName) return;
 
@@ -595,16 +595,23 @@ export default function ArenaPage() {
             const redTeam = Object.values(data.red || {}).filter(p => p !== null) as TeamLobbyPlayer[];
             
             const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
-            const amIInLobby = [...blueTeam, ...redTeam].some(p => p.id === player.id);
-            const shouldIStartMatch = isLobbyFull && amIInLobby && !data.battleId;
-            
-            if (shouldIStartMatch) {
-                // To prevent multiple clients from starting the match, only one should do it.
-                // We'll have the client with the lowest sorted player ID do it.
-                const allPlayers = [...blueTeam, ...redTeam].sort((a, b) => a.id.localeCompare(b.id));
-                if (allPlayers[0]?.id === player.id) {
-                    startTeamBattle(data);
-                }
+            const amIInLobby = [...blueTeam, ...redTeam].some(p => p?.id === player.id);
+            const shouldStartMatch = isLobbyFull && amIInLobby && data.status === 'waiting';
+
+            if (shouldStartMatch) {
+                // Use a transaction to ensure only one client starts the match.
+                const lobbyStatusRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/status`);
+                rtdbRunTransaction(lobbyStatusRef, (currentStatus) => {
+                    if (currentStatus === 'waiting') {
+                        return 'starting'; // Claim the right to start the match
+                    }
+                    return; // Abort transaction if someone else is already starting it
+                }).then(({ committed }) => {
+                    if (committed) {
+                        // This client won the race, so it starts the battle.
+                        startTeamBattle(data);
+                    }
+                });
             }
 
             if (data.battleId) {

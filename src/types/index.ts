@@ -63,6 +63,7 @@ export interface TeamLobby {
     blue: { [slot: string]: TeamLobbyPlayer | null };
     red: { [slot: string]: TeamLobbyPlayer | null };
     battleId: string | null;
+    status: 'waiting' | 'starting';
 }
 
 export interface TeamBattle {
