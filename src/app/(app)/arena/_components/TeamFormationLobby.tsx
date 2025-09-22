@@ -7,8 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Users, LogOut, Loader2, Bot } from 'lucide-react';
-import type { Player, TeamLobby } from '@/types';
+import type { Player, TeamLobby, TeamLobbyPlayer } from '@/types';
 import { cn } from '@/lib/utils';
+import placeholderImages from '@/lib/placeholder-images.json';
 
 
 interface TeamFormationLobbyProps {
@@ -22,8 +23,17 @@ interface TeamFormationLobbyProps {
 const SLOTS: ('1' | '2' | '3' | '4')[] = ['1', '2', '3', '4'];
 
 
-function TeamSlot({ slot, playerInfo, onJoin, teamName, disabled }: { slot: '1' | '2' | '3' | '4'; playerInfo: { id: string; username: string; avatarUrl?: string; rating: number; } | null; onJoin: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void; teamName: 'blue' | 'red'; disabled?: boolean }) {
+function TeamSlot({ slot, playerInfo, onJoin, teamName, disabled }: { slot: '1' | '2' | '3' | '4'; playerInfo: TeamLobbyPlayer | null; onJoin: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void; teamName: 'blue' | 'red'; disabled?: boolean }) {
     const canJoin = !playerInfo && !disabled;
+    
+    const getImage = (p: TeamLobbyPlayer | null) => {
+        if (!p) return "";
+        if (p.id.startsWith('bot_')) {
+            const botName = p.id.split('_')[1];
+            return placeholderImages.bots[botName as keyof typeof placeholderImages.bots] || "";
+        }
+        return p.avatarUrl || placeholderImages.defaultUser;
+    }
 
     return (
         <div className="flex items-center justify-between p-3 bg-background/50 rounded-lg">
@@ -31,7 +41,7 @@ function TeamSlot({ slot, playerInfo, onJoin, teamName, disabled }: { slot: '1' 
                 <Avatar className="h-10 w-10 border-2 border-muted">
                     {playerInfo ? (
                         <>
-                         <AvatarImage src={playerInfo.avatarUrl} alt={playerInfo.username} data-ai-hint="avatar placeholder" />
+                         <AvatarImage src={getImage(playerInfo)} alt={playerInfo.username} data-ai-hint="avatar placeholder" />
                          <AvatarFallback>{playerInfo.username.substring(0, 2).toUpperCase()}</AvatarFallback>
                         </>
                     ) : (
@@ -81,7 +91,7 @@ export function TeamFormationLobby({ player, lobbyData, onJoinTeam, onLeave, onF
     const allPlayersInLobby = [
         ...Object.values(lobbyData.blue || {}),
         ...Object.values(lobbyData.red || {})
-    ].filter(p => p !== null);
+    ].filter((p): p is TeamLobbyPlayer => p !== null);
 
     const isPlayerInLobby = allPlayersInLobby.some(p => p?.id === player.id);
     const totalPlayers = allPlayersInLobby.length;
