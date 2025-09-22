@@ -591,8 +591,8 @@ export default function ArenaPage() {
         if(data){
             setTeamLobbyData(data);
 
-            const blueTeam = Object.values(data.blue).filter(p => p !== null) as TeamLobbyPlayer[];
-            const redTeam = Object.values(data.red).filter(p => p !== null) as TeamLobbyPlayer[];
+            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[];
+            const redTeam = Object.values(data.red || {}).filter(p => p !== null) as TeamLobbyPlayer[];
             
             const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
             const amIInLobby = [...blueTeam, ...redTeam].some(p => p.id === player.id);
