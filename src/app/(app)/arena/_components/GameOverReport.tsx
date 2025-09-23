@@ -13,6 +13,7 @@ import { AlertTriangle, CheckCircle, Swords, Flag, Brain, Coins, FileCode, XCirc
 import type { Player, Battle, TeamBattle } from '@/types';
 import { CodeEditor } from './CodeEditor';
 import { cn } from '@/lib/utils';
+import { TeamBattleReportDetails } from './TeamBattleReportDetails';
 
 interface GameOverReportProps {
     battleData?: Battle | null;
@@ -197,6 +198,16 @@ export function GameOverReport({ battleData, teamBattleData, player, onFindNewMa
                                 isWinner={teamBattleData.winnerTeam === 'team2'}
                            />
                         </div>
+
+                         <Accordion type="single" collapsible className="w-full" defaultValue="team-report-details">
+                            <AccordionItem value="team-report-details">
+                                <AccordionTrigger className="text-lg hover:no-underline"><Brain className="mr-2 h-5 w-5 text-primary"/> Detailed Team Battle Report</AccordionTrigger>
+                                <AccordionContent className="space-y-4 pt-4">
+                                   <TeamBattleReportDetails battle={teamBattleData} />
+                                </AccordionContent>
+                            </AccordionItem>
+                        </Accordion>
+                        
                         <div className="text-center text-muted-foreground">Your coins: {player?.coins ?? 0} <Coins className="inline h-4 w-4 text-yellow-500 align-baseline"/></div>
                         <div className="flex flex-col sm:flex-row gap-4 pt-4">
                             <Button asChild variant="outline" className="w-full">
