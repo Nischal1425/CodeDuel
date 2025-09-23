@@ -12,15 +12,14 @@ import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-c
 import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsInput } from '@/ai/flows/compare-code-submissions';
 import { compareCodeSubmissions } from '@/ai/flows/compare-code-submissions';
-import { compareTeamSubmissions } from '@/ai/flows/compare-team-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamBattlePlayer, TeamLobbyPlayer } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamLobbyPlayer } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
 import { db, rtdb } from '@/lib/firebase';
-import { collection, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction, setDoc, getDoc, increment } from "firebase/firestore";
+import { collection, doc, onSnapshot, updateDoc, serverTimestamp, writeBatch, runTransaction, setDoc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { ref, onValue, remove, set, get, child, goOffline, goOnline, serverTimestamp as rtdbServerTimestamp, runTransaction as rtdbRunTransaction } from "firebase/database";
 
 
@@ -70,7 +69,6 @@ export default function ArenaPage() {
   const [battleId, setBattleId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
   const [teamLobbyData, setTeamLobbyData] = useState<TeamLobby | null>(null);
-  const [teamBattleId, setTeamBattleId] = useState<string | null>(null);
   const [teamBattleData, setTeamBattleData] = useState<TeamBattle | null>(null);
 
   
@@ -79,7 +77,6 @@ export default function ArenaPage() {
   const playerBattleListenerUnsubscribe = useRef<() => void | undefined>();
   const teamLobbyRef = useRef<any>();
   const teamLobbyListenerUnsubscribe = useRef<() => void | undefined>();
-  const teamBattleListenerUnsubscribe = useRef<() => void | undefined>();
 
 
   const cleanupListeners = useCallback(() => {
@@ -96,10 +93,6 @@ export default function ArenaPage() {
         teamLobbyListenerUnsubscribe.current = undefined;
         if(teamLobbyRef.current) remove(teamLobbyRef.current);
         teamLobbyRef.current = null;
-    }
-     if (teamBattleListenerUnsubscribe.current) {
-        teamBattleListenerUnsubscribe.current();
-        teamBattleListenerUnsubscribe.current = undefined;
     }
     if (playerBattleListenerUnsubscribe.current) {
         playerBattleListenerUnsubscribe.current();
@@ -124,7 +117,6 @@ export default function ArenaPage() {
     setBattleId(null);
     setBattleData(null);
     setTeamLobbyData(null);
-    setTeamBattleId(null);
     setTeamBattleData(null);
     hasInitializedCode.current = false;
   }, [cleanupListeners]);
@@ -139,58 +131,61 @@ export default function ArenaPage() {
   }, [toast]);
   
 
- const processGameEnd = useCallback(async (battle: Battle) => {
+ const processGameEnd = useCallback(async (battle: Battle, teamBattleOutcome?: 'win' | 'loss' | 'draw') => {
     if (!player) return;
     
     const hasProcessedKey = `processed_match_${battle.id}`;
     if (sessionStorage.getItem(hasProcessedKey)) return;
     sessionStorage.setItem(hasProcessedKey, 'true');
 
-    const entryFee = battle.wager;
-    let outcome: 'win' | 'loss' | 'draw' = 'draw';
+    // If a team outcome is provided, use that for toasts and stats. Otherwise, use the 1v1 duel outcome.
+    const finalOutcome = teamBattleOutcome ? teamBattleOutcome : (battle.winnerId === player.id ? 'win' : (!battle.winnerId ? 'draw' : 'loss'));
+
     let toastTitle = "Match Over";
     let toastDesc = "The match has concluded.";
     let toastVariant: "default" | "destructive" = "default";
     
-    if (battle.status === 'forfeited') {
-        if (battle.winnerId === player.id) {
-            outcome = 'win';
-            toastTitle="Victory by Forfeit!";
-            toastDesc=`Your opponent forfeited.`;
-        } else {
-            outcome = 'loss';
-            toastTitle="You Forfeited";
-            toastDesc=`You forfeited the match and lost your wager.`;
-            toastVariant="destructive";
-        }
-    } else { // Completed
-        if (battle.winnerId === player.id) {
-            outcome = 'win';
-            toastTitle="Victory!";
-            toastDesc=`You won the duel!`;
-        } else if (!battle.winnerId) {
-            outcome = 'draw';
-            toastTitle="Draw!";
-            toastDesc=`The duel ended in a draw. Your entry fee of ${entryFee} coins was refunded.`;
-        } else {
-            outcome = 'loss';
-            toastTitle="Defeat";
-            toastDesc="Your opponent's solution was deemed superior.";
-            toastVariant="destructive";
+    if (teamBattleOutcome) {
+        toastTitle = finalOutcome === 'win' ? 'Team Victory!' : (finalOutcome === 'draw' ? 'Team Draw!' : 'Team Defeat');
+        toastDesc = `Your team ${finalOutcome === 'win' ? 'was victorious' : (finalOutcome === 'draw' ? 'drew' : 'was defeated')} in the 4v4!`;
+        if(finalOutcome === 'loss') toastVariant = 'destructive';
+    } else {
+         if (battle.status === 'forfeited') {
+            if (battle.winnerId === player.id) {
+                toastTitle="Victory by Forfeit!";
+                toastDesc=`Your opponent forfeited.`;
+            } else {
+                toastTitle="You Forfeited";
+                toastDesc=`You forfeited the match and lost your wager.`;
+                toastVariant="destructive";
+            }
+        } else { // Completed
+            if (finalOutcome === 'win') {
+                toastTitle="Victory!";
+                toastDesc=`You won the duel!`;
+            } else if (finalOutcome === 'draw') {
+                toastTitle="Draw!";
+                toastDesc=`The duel ended in a draw. Your entry fee of ${battle.wager} coins was refunded.`;
+            } else {
+                toastTitle="Defeat";
+                toastDesc="Your opponent's solution was deemed superior.";
+                toastVariant="destructive";
+            }
         }
     }
+
 
     const opponentInfo = player.id === battle.player1.id ? battle.player2 : battle.player1;
     const opponentRank = opponentInfo?.id === 'bot-player' ? player.rank : (opponentInfo ? 10 : player.rank);
 
-    const achievementResult = checkAchievementsOnMatchEnd(player, { won: outcome === 'win', opponentRank, lobbyDifficulty: battle.difficulty });
+    const achievementResult = checkAchievementsOnMatchEnd(player, { won: finalOutcome === 'win', opponentRank, lobbyDifficulty: battle.difficulty });
     
     const finalPlayerStats = achievementResult.updatedPlayer;
 
     const newMatchHistoryEntry: Omit<MatchHistoryEntry, 'id' | 'playerId'> = {
       matchId: battle.id,
       opponent: { username: opponentInfo?.username || 'Unknown', avatarUrl: opponentInfo?.avatarUrl },
-      outcome: outcome,
+      outcome: finalOutcome,
       difficulty: battle.difficulty,
       wager: battle.wager,
       date: new Date().toISOString().split('T')[0],
@@ -209,11 +204,11 @@ export default function ArenaPage() {
                  unlockedAchievements: finalPlayerStats.unlockedAchievements,
              });
              
-             if(outcome === 'win') {
+             if(finalOutcome === 'win') {
                 const winnings = Math.floor(battle.wager * 2 * (1 - COMMISSION_RATE));
-                batch.update(playerRef, { coins: player.coins + winnings });
-             } else if (outcome === 'draw') {
-                batch.update(playerRef, { coins: player.coins + battle.wager });
+                batch.update(playerRef, { 'coins': finalPlayerStats.coins - battle.wager + winnings });
+             } else if (finalOutcome === 'draw') {
+                batch.update(playerRef, { 'coins': finalPlayerStats.coins });
              } // no change for loss as coins were already deducted
 
              const historyRef = collection(db, 'matchHistory');
@@ -236,80 +231,79 @@ export default function ArenaPage() {
   }, [player, showAchievementToast, toast]);
 
 
- const processTeamGameEnd = useCallback(async (battle: TeamBattle) => {
-    if (!player) return;
+ const handleTeamMatchCompletion = useCallback(async (completedBattle: Battle) => {
+    if (!completedBattle.teamBattleId || !IS_FIREBASE_CONFIGURED || !player) return;
 
-    const hasProcessedKey = `processed_team_match_${battle.id}`;
-    if (sessionStorage.getItem(hasProcessedKey)) return;
-    sessionStorage.setItem(hasProcessedKey, 'true');
+    const teamBattleRef = doc(db, "teamBattles", completedBattle.teamBattleId);
+    let allTeamBattles: Battle[] = [];
+    let teamBattleDoc: TeamBattle | null = null;
     
-    const isPlayerOnTeam1 = battle.team1.some(p => p.id === player.id);
-    const playerTeam = isPlayerOnTeam1 ? 'team1' : 'team2';
-    
-    let outcome: 'win' | 'loss' | 'draw' = 'draw';
-    if (battle.winnerTeam && battle.winnerTeam !== 'draw') {
-        outcome = battle.winnerTeam === playerTeam ? 'win' : 'loss';
-    }
-
-    let toastTitle = "Team Match Over";
-    let toastDesc = "The match has concluded.";
-    let toastVariant: "default" | "destructive" = "default";
-    
-    if (outcome === 'win') {
-        toastTitle="Team Victory!";
-        toastDesc=`Your team won the deathmatch!`;
-    } else if (outcome === 'draw') {
-        toastTitle="Draw!";
-        toastDesc=`The match ended in a draw. Your entry fee was refunded.`;
-    } else {
-        toastTitle="Team Defeat";
-        toastDesc="The opposing team was victorious.";
-        toastVariant="destructive";
-    }
-
-    const achievementResult = checkAchievementsOnMatchEnd(player, { won: outcome === 'win', opponentRank: 10, lobbyDifficulty: battle.difficulty });
-    const finalPlayerStats = achievementResult.updatedPlayer;
-
+    // Use a transaction to safely update the count of finished duels
     try {
-        if (IS_FIREBASE_CONFIGURED) {
-             const playerRef = doc(db, "players", player.id);
-             await runTransaction(db, async (transaction) => {
-                const playerDoc = await transaction.get(playerRef);
-                if (!playerDoc.exists()) throw new Error("Player not found");
-                const currentCoins = playerDoc.data().coins || 0;
+        await runTransaction(db, async (transaction) => {
+            const teamBattleSnap = await transaction.get(teamBattleRef);
+            if (!teamBattleSnap.exists() || teamBattleSnap.data().status === 'completed') {
+                return; // Already processed
+            }
+            teamBattleDoc = teamBattleSnap.data() as TeamBattle;
+            
+            const newFinishedCount = (teamBattleDoc.finishedDuels || 0) + 1;
+            transaction.update(teamBattleRef, { finishedDuels: newFinishedCount });
 
-                const updates: any = {
-                    matchesPlayed: finalPlayerStats.matchesPlayed,
-                    wins: finalPlayerStats.wins,
-                    losses: finalPlayerStats.losses,
-                    winStreak: finalPlayerStats.winStreak,
-                    unlockedAchievements: finalPlayerStats.unlockedAchievements,
-                };
+            if (newFinishedCount === 4) {
+                transaction.update(teamBattleRef, { status: 'completed' });
+            }
+        });
 
-                 if (outcome === 'win') {
-                    const winnings = Math.floor(battle.wager * 2 * (1 - COMMISSION_RATE));
-                    updates.coins = currentCoins + winnings;
-                } else if (outcome === 'draw') {
-                    updates.coins = currentCoins + battle.wager;
-                }
-                
-                transaction.update(playerRef, updates);
-            });
+        // Refetch the document outside the transaction to check the final state
+        const finalTeamBattleSnap = await getDoc(teamBattleRef);
+        const finalTeamBattleData = finalTeamBattleSnap.data() as TeamBattle;
+
+        if (finalTeamBattleData.status !== 'completed') {
+            return; // Not all duels are finished yet
         }
-    } catch (error) {
-        console.error("Failed to update player stats for team game:", error);
-        toast({ title: "Sync Error", description: "Could not save team match results.", variant: "destructive" });
+
+        // If we reach here, this client is responsible for tallying results
+        const battlesQuery = query(collection(db, 'battles'), where("teamBattleId", "==", completedBattle.teamBattleId));
+        const battlesSnapshot = await getDocs(battlesQuery);
+        allTeamBattles = battlesSnapshot.docs.map(d => d.data() as Battle);
+        
+        let team1Wins = 0;
+        let team2Wins = 0;
+
+        const team1Ids = finalTeamBattleData.team1.map(p => p.id);
+
+        allTeamBattles.forEach(b => {
+            if (b.winnerId) {
+                if (team1Ids.includes(b.winnerId)) {
+                    team1Wins++;
+                } else {
+                    team2Wins++;
+                }
+            }
+        });
+        
+        let winnerTeam: 'team1' | 'team2' | 'draw' | null = null;
+        if (team1Wins > team2Wins) winnerTeam = 'team1';
+        else if (team2Wins > team1Wins) winnerTeam = 'team2';
+        else winnerTeam = 'draw';
+        
+        await updateDoc(teamBattleRef, { winnerTeam });
+
+        // Process game end for the current player with the team outcome
+        const playerTeam = team1Ids.includes(player.id) ? 'team1' : 'team2';
+        const teamOutcome = winnerTeam === 'draw' ? 'draw' : (winnerTeam === playerTeam ? 'win' : 'loss');
+
+        // Find the player's specific battle to pass to processGameEnd
+        const playerBattle = allTeamBattles.find(b => b.player1.id === player.id || b.player2?.id === player.id);
+        if (playerBattle) {
+            await processGameEnd(playerBattle, teamOutcome);
+        }
+
+    } catch (e) {
+        console.error("Error finalizing team battle:", e);
     }
-
-    toast({ title: toastTitle, description: toastDesc, variant: toastVariant, duration: 7000 });
-    achievementResult.newlyUnlocked.forEach(showAchievementToast);
-    
-    setGameState('gameOver');
-
-    setTimeout(() => {
-        sessionStorage.removeItem(hasProcessedKey);
-    }, 3000);
- }, [player, toast, showAchievementToast]);
+}, [player, processGameEnd]);
 
 
  const handleSubmissionFinalization = useCallback(async (currentBattle: Battle) => {
@@ -365,32 +359,6 @@ export default function ArenaPage() {
       }
     }
   }, [player, toast, processGameEnd]);
-
-  const handleTeamSubmissionFinalization = useCallback(async (currentBattle: TeamBattle) => {
-    if (!player || !IS_FIREBASE_CONFIGURED) return;
-    
-    try {
-        const result = await compareTeamSubmissions({
-            team1: currentBattle.team1,
-            team2: currentBattle.team2,
-            question: currentBattle.question,
-        });
-
-        await updateDoc(doc(db, 'teamBattles', currentBattle.id), {
-            team1: result.team1,
-            team2: result.team2,
-            team1Score: result.team1Score,
-            team2Score: result.team2Score,
-            winnerTeam: result.winnerTeam,
-            status: 'completed',
-        });
-
-    } catch (error) {
-        console.error("Error during team submission comparison:", error);
-        toast({ title: "Comparison Error", description: "Could not compare team submissions.", variant: "destructive" });
-        await updateDoc(doc(db, 'teamBattles', currentBattle.id), { status: 'completed' });
-    }
-  }, [player, toast]);
 
 
   const findMatch = useCallback(async (lobby: LobbyInfo) => {
@@ -544,49 +512,78 @@ export default function ArenaPage() {
       }
   }, [player, toast, resetGameState]);
 
-  const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
-    if (!player || !rtdb) return;
+ const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
+    if (!player || !rtdb || !IS_FIREBASE_CONFIGURED) return;
 
     try {
         const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
         if (!lobby) throw new Error("Lobby configuration not found.");
+
+        const teamBattleId = `team-battle-${Date.now()}`;
+        const team1 = Object.values(finalLobbyData.blue || {}).filter((p): p is TeamLobbyPlayer => p !== null);
+        const team2 = Object.values(finalLobbyData.red || {}).filter((p): p is TeamLobbyPlayer => p !== null);
         
-        const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyName });
-
-        const toTeamBattlePlayer = (p: TeamLobbyPlayer): TeamBattlePlayer => {
-             const isBot = p.id.startsWith('bot_');
-             return {
-                ...p,
-                language: DEFAULT_LANGUAGE,
-                code: isBot ? question.solution : getCodePlaceholder(DEFAULT_LANGUAGE, question),
-                hasSubmitted: isBot,
-             };
-        };
-
-        const team1 = Object.values(finalLobbyData.blue || {}).filter((p): p is TeamLobbyPlayer => p !== null).map(toTeamBattlePlayer);
-        const team2 = Object.values(finalLobbyData.red || {}).filter((p): p is TeamLobbyPlayer => p !== null).map(toTeamBattlePlayer);
-
-        const battleId = `team-battle-${Date.now()}`;
-        const battleDocRef = doc(db, 'teamBattles', battleId);
-        
-        const newBattle: TeamBattle = {
-            id: battleId,
+        // Create a TeamBattle document to track the overall match
+        await setDoc(doc(db, 'teamBattles', teamBattleId), {
+            id: teamBattleId,
             team1,
             team2,
-            team1Score: 0,
-            team2Score: 0,
             status: 'in-progress',
             difficulty: lobbyName,
-            wager: lobby.entryFee,
-            question,
             createdAt: serverTimestamp(),
-            winnerTeam: null,
-        };
+            finishedDuels: 0,
+            winnerTeam: null
+        });
 
-        await setDoc(battleDocRef, newBattle);
+        // Generate 4 unique questions in parallel
+        const questionPromises = [
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+        ];
+        const questions = await Promise.all(questionPromises);
+
+        const battleCreationPromises = [];
+        const battleNotifications: { [playerId: string]: string } = {};
+
+        for (let i = 0; i < 4; i++) {
+            const player1 = team1[i];
+            const player2 = team2[i];
+            if (!player1 || !player2) continue;
+
+            const question = questions[i];
+            const battleId = `${teamBattleId}_${i + 1}`;
+
+            const newBattle: Battle = {
+                id: battleId,
+                teamBattleId: teamBattleId,
+                player1: { id: player1.id, username: player1.username, avatarUrl: player1.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false },
+                player2: { id: player2.id, username: player2.username, avatarUrl: player2.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false },
+                status: 'in-progress',
+                difficulty: lobbyName,
+                wager: lobby.entryFee,
+                question,
+                createdAt: serverTimestamp(),
+                startedAt: serverTimestamp(),
+            };
+            
+            battleCreationPromises.push(setDoc(doc(db, 'battles', battleId), newBattle));
+            battleNotifications[player1.id] = battleId;
+            battleNotifications[player2.id] = battleId;
+        }
+
+        // Create all battle documents in a batch
+        await Promise.all(battleCreationPromises);
+
+        // Notify all players of their specific battle ID
+        const notificationPromises = Object.entries(battleNotifications).map(([playerId, battleId]) => {
+            return set(ref(rtdb, `playerBattles/${playerId}`), battleId);
+        });
+        await Promise.all(notificationPromises);
         
-        const teamLobbyBattleRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/battleId`);
-        await set(teamLobbyBattleRef, battleId);
+        // Cleanup the team lobby
+        await remove(ref(rtdb, `teamMatchmakingQueue/${lobbyName}`));
 
     } catch (error) {
         console.error("Error starting team battle:", error);
@@ -601,6 +598,16 @@ export default function ArenaPage() {
     
     teamLobbyRef.current = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
     
+    // Set up a listener for my personal battle ID before I even join the lobby.
+    const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
+    playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
+        const newBattleId = snapshot.val();
+        if (newBattleId) {
+            setBattleId(newBattleId);
+            remove(playerBattleRef); // Clean up temp node
+        }
+    });
+
     const snapshot = await get(teamLobbyRef.current);
     if (!snapshot.exists()) {
         await set(teamLobbyRef.current, initialTeamLobbyState);
@@ -610,19 +617,15 @@ export default function ArenaPage() {
         const data: TeamLobby | null = snapshot.val();
         if(data){
             setTeamLobbyData(data);
-
-            if (data.battleId) {
-                setTeamBattleId(data.battleId);
-                return;
-            }
-
+            
             const blueTeam = Object.values(data.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[];
             const redTeam = Object.values(data.red || {}).filter(p => p !== null) as TeamLobbyPlayer[];
             
             const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
-            const amIInLobby = [...blueTeam, ...redTeam].some(p => p.id === player.id);
+            // The first player to join (or any player) can be designated to start the match
+            const amIStarter = [...blueTeam, ...redTeam].sort((a,b) => a.id.localeCompare(b.id))[0]?.id === player.id;
             
-            if (isLobbyFull && amIInLobby && data.status === 'waiting') {
+            if (isLobbyFull && amIStarter && data.status === 'waiting') {
                 const lobbyStatusRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/status`);
                 rtdbRunTransaction(lobbyStatusRef, (currentStatus) => {
                     if (currentStatus === 'waiting') return 'starting';
@@ -774,11 +777,11 @@ export default function ArenaPage() {
       const newBattleData = { id: docSnap.id, ...docSnap.data() } as Battle;
       setBattleData(newBattleData);
       
-      const wasSearching = gameState === 'searching' || gameState === 'formingTeam';
+      const wasSearchingOrForming = gameState === 'searching' || gameState === 'formingTeam';
 
       if (newBattleData.status === 'in-progress') {
         setGameState(currentState => {
-            if (wasSearching) {
+            if (wasSearchingOrForming) {
                 const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty);
                 if (lobby) setTimeRemaining(lobby.baseTime * 60);
                 setTimeout(() => {
@@ -793,7 +796,11 @@ export default function ArenaPage() {
       if (newBattleData.status === 'completed' || newBattleData.status === 'forfeited') {
         setGameState(currentState => {
           if (currentState !== 'gameOver') {
-            processGameEnd(newBattleData);
+            if (newBattleData.teamBattleId) {
+                handleTeamMatchCompletion(newBattleData);
+            } else {
+                processGameEnd(newBattleData);
+            }
             return 'gameOver';
           }
           return currentState;
@@ -822,54 +829,7 @@ export default function ArenaPage() {
         battleListenerUnsubscribe.current();
       }
     };
-  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState, gameState]);
-
-
-  useEffect(() => {
-    if (!teamBattleId || !player || !IS_FIREBASE_CONFIGURED) return;
-    
-    const teamBattleDocRef = doc(db, 'teamBattles', teamBattleId);
-    
-    teamBattleListenerUnsubscribe.current = onSnapshot(teamBattleDocRef, async (docSnap) => {
-        if (docSnap.exists()) {
-            const data = { id: docSnap.id, ...docSnap.data() } as TeamBattle;
-            setTeamBattleData(data);
-            
-            const wasFormingTeam = gameState === 'formingTeam';
-            if (data.status === 'in-progress' && wasFormingTeam) {
-                 const lobby = LOBBIES.find(l => l.name === data.difficulty && l.gameMode === '4v4');
-                 if (lobby) setTimeRemaining(lobby.baseTime * 60);
-                 setGameState('inTeamGame');
-                 toast({ title: "Team Battle Starting!", description: "The 4v4 match is beginning now!", className: "bg-green-500 text-white" });
-            }
-
-            const allPlayersSubmitted = [...data.team1, ...data.team2].every(p => p.hasSubmitted);
-
-            if (data.status === 'in-progress' && allPlayersSubmitted) {
-                 if (player?.id === data.team1[0].id) { 
-                    await updateDoc(docSnap.ref, { status: 'comparing' });
-                    await handleTeamSubmissionFinalization(data);
-                 }
-            }
-
-            if (data.status === 'completed' && gameState !== 'gameOver') {
-                processTeamGameEnd(data);
-            }
-
-        } else {
-             if (gameState !== 'selectingLobby') { 
-                toast({ title: "Team Match Canceled", description: "The team match was removed.", variant: "default" });
-                resetGameState();
-             }
-        }
-    });
-
-    return () => {
-        if (teamBattleListenerUnsubscribe.current) {
-            teamBattleListenerUnsubscribe.current();
-        }
-    }
-  }, [teamBattleId, player, gameState, resetGameState, toast, processTeamGameEnd, handleTeamSubmissionFinalization]);
+  }, [battleId, player, handleSubmissionFinalization, processGameEnd, toast, resetGameState, gameState, handleTeamMatchCompletion]);
 
 
   const handleSubmitCode = async (e?: FormEvent) => {
@@ -880,7 +840,7 @@ export default function ArenaPage() {
         const me = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
         if (me?.hasSubmitted) return;
 
-        toast({ title: "Code Submitted!", description: "Your solution is locked in for the 1v1 duel.", className: "bg-primary text-primary-foreground" });
+        toast({ title: "Code Submitted!", description: "Your solution is locked in for the duel.", className: "bg-primary text-primary-foreground" });
         
         const playerKey = battleData.player1.id === player.id ? 'player1' : 'player2';
 
@@ -911,31 +871,6 @@ export default function ArenaPage() {
             setGameState('submittingComparison');
             await handleSubmissionFinalization(finalBattleState);
         }
-    } else if (gameState === 'inTeamGame' && teamBattleData) {
-        if (!IS_FIREBASE_CONFIGURED) {
-             toast({ title: "Offline Mode", description: "Team battles are not supported in offline mode.", variant: "destructive" });
-             return;
-        }
-
-        const playerTeamKey = teamBattleData.team1.some(p => p.id === player.id) ? 'team1' : 'team2';
-        const playerIndex = teamBattleData[playerTeamKey].findIndex(p => p.id === player.id);
-        
-        if (playerIndex === -1 || teamBattleData[playerTeamKey][playerIndex].hasSubmitted) return;
-
-        toast({ title: "Code Submitted!", description: "Your solution is locked in for the team battle.", className: "bg-primary text-primary-foreground" });
-        
-        const teamBattleRef = doc(db, 'teamBattles', teamBattleData.id);
-        
-        // This creates a copy of the team array, updates the specific player, and then we'll set the whole array.
-        const updatedTeam = [...teamBattleData[playerTeamKey]];
-        updatedTeam[playerIndex] = {
-            ...updatedTeam[playerIndex],
-            code: code,
-            language: language,
-            hasSubmitted: true,
-        };
-
-        await updateDoc(teamBattleRef, { [playerTeamKey]: updatedTeam });
     }
   };
 
@@ -958,13 +893,6 @@ export default function ArenaPage() {
             setBattleData(finalBattleState);
             await processGameEnd(finalBattleState);
             setGameState('gameOver');
-        }
-    } else if (gameState === 'inTeamGame' && teamBattleData && teamBattleData.status === 'in-progress') {
-        toast({ title: "Time's Up!", description: "The match timer has expired. Comparing submissions...", variant: "destructive" });
-        if (IS_FIREBASE_CONFIGURED && player.id === teamBattleData.team1[0].id) {
-             const battleRef = doc(db, 'teamBattles', teamBattleData.id);
-             await updateDoc(battleRef, { status: 'comparing' });
-             await handleTeamSubmissionFinalization(teamBattleData);
         }
     }
   };
@@ -1073,32 +1001,23 @@ export default function ArenaPage() {
   const hasInitializedCode = useRef(false);
 
   useEffect(() => {
-    if ((battleData?.question || teamBattleData?.question) && player && !hasInitializedCode.current) {
-        const question = battleData?.question || teamBattleData?.question;
+    if (battleData?.question && player && !hasInitializedCode.current) {
+        const question = battleData.question;
         
         let initialCode = getCodePlaceholder(language, question);
         let initialLanguage = DEFAULT_LANGUAGE;
 
-        if (battleData) {
-            const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
-            if (meInDb && !meInDb.hasSubmitted) {
-                initialCode = meInDb.code || initialCode;
-                initialLanguage = meInDb.language || initialLanguage;
-            }
-        } else if (teamBattleData) {
-            const team = teamBattleData.team1.find(p => p.id === player.id) ? 'team1' : 'team2';
-            const meInDb = teamBattleData[team].find(p => p.id === player.id);
-            if (meInDb && !meInDb.hasSubmitted) {
-                initialCode = meInDb.code || initialCode;
-                initialLanguage = meInDb.language || initialLanguage;
-            }
+        const meInDb = battleData.player1.id === player.id ? battleData.player1 : battleData.player2;
+        if (meInDb && !meInDb.hasSubmitted) {
+            initialCode = meInDb.code || initialCode;
+            initialLanguage = meInDb.language || initialLanguage;
         }
 
         setCode(initialCode);
         setLanguage(initialLanguage);
         hasInitializedCode.current = true;
     }
-  }, [battleData, teamBattleData, player, language]);
+  }, [battleData, player, language]);
 
 
   useEffect(() => {
@@ -1183,24 +1102,6 @@ export default function ArenaPage() {
               );
             }
             return null;
-        case 'inTeamGame':
-             if (!teamBattleData || !player) {
-                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading Team Battle...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
-            }
-            return (
-                <TeamBattleView 
-                    battleData={teamBattleData}
-                    player={player}
-                    timeRemaining={timeRemaining}
-                    code={code}
-                    onCodeChange={setCode}
-                    language={language}
-                    onLanguageChange={onLanguageChange}
-                    onSubmitCode={handleSubmitCode}
-                    onTimeUp={handleTimeUp}
-                    onForfeit={() => setShowLeaveConfirm(true)}
-                />
-            );
         case 'submittingComparison':
             return (
                 <div className="flex flex-col items-center justify-center h-full text-center p-4">
@@ -1210,7 +1111,7 @@ export default function ArenaPage() {
                 </div>
             );
         case 'gameOver':
-            if ((!battleData && !teamBattleData) || !player) {
+            if (!battleData || !player) {
                 return (
                     <div className="flex flex-col items-center justify-center h-full text-center p-4">
                         <p className="mb-4">Match data not found.</p>
@@ -1221,7 +1122,6 @@ export default function ArenaPage() {
             return (
                 <GameOverReport
                     battleData={battleData}
-                    teamBattleData={teamBattleData}
                     player={player}
                     onFindNewMatch={handleFindNewMatch}
                 />
@@ -1278,20 +1178,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-
-
-    
-
-    
-
-
-
-
-
-
-    
-
-    
-
-

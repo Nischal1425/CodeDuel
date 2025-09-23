@@ -27,6 +27,7 @@ export interface Player {
 
 export interface Battle {
   id: string; // Firestore document ID
+  teamBattleId?: string; // Links this duel to a 4v4 match
   player1: { 
     id: string; 
     username: string; 
@@ -71,20 +72,16 @@ export interface TeamLobby {
     blue: { [slot: string]: TeamLobbyPlayer | null };
     red: { [slot: string]: TeamLobbyPlayer | null };
     status: 'waiting' | 'starting';
-    battleId?: string; // ADD THIS
 }
 
 export interface TeamBattle {
     id: string;
-    team1: TeamBattlePlayer[];
-    team2: TeamBattlePlayer[];
-    team1Score: number;
-    team2Score: number;
-    status: 'in-progress' | 'comparing' | 'completed';
+    team1: TeamLobbyPlayer[];
+    team2: TeamLobbyPlayer[];
+    status: 'in-progress' | 'completed';
     difficulty: 'easy' | 'medium' | 'hard';
-    wager: number;
-    question: GenerateCodingChallengeOutput;
     createdAt: any; // Firestore Timestamp
+    finishedDuels: number;
     winnerTeam: 'team1' | 'team2' | 'draw' | null;
 }
 
@@ -144,10 +141,3 @@ export interface MatchHistoryEntry {
   wager: number;
   date: string; 
 }
-
-
-    
-
-    
-
-    
