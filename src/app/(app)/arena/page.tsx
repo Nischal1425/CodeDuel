@@ -523,7 +523,6 @@ export default function ArenaPage() {
         const team1 = Object.values(finalLobbyData.blue || {}).filter((p): p is TeamLobbyPlayer => p !== null);
         const team2 = Object.values(finalLobbyData.red || {}).filter((p): p is TeamLobbyPlayer => p !== null);
         
-        // Create a TeamBattle document to track the overall match
         await setDoc(doc(db, 'teamBattles', teamBattleId), {
             id: teamBattleId,
             team1,
@@ -535,7 +534,6 @@ export default function ArenaPage() {
             winnerTeam: null
         });
 
-        // Generate 4 unique questions in parallel
         const questionPromises = [
             generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
             generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
@@ -553,7 +551,7 @@ export default function ArenaPage() {
             if (!player1 || !player2) continue;
 
             const question = questions[i];
-            const battleId = `${teamBattleId}_${i + 1}`;
+            const battleId = `${teamBattleId}_duel_${i + 1}`;
 
             const newBattle: Battle = {
                 id: battleId,
@@ -573,16 +571,13 @@ export default function ArenaPage() {
             battleNotifications[player2.id] = battleId;
         }
 
-        // Create all battle documents in a batch
         await Promise.all(battleCreationPromises);
 
-        // Notify all players of their specific battle ID
-        const notificationPromises = Object.entries(battleNotifications).map(([playerId, battleId]) => {
-            return set(ref(rtdb, `playerBattles/${playerId}`), battleId);
+        const notificationPromises = Object.entries(battleNotifications).map(([playerId, bId]) => {
+            return set(ref(rtdb, `playerBattles/${playerId}`), bId);
         });
         await Promise.all(notificationPromises);
         
-        // Cleanup the team lobby
         await remove(ref(rtdb, `teamMatchmakingQueue/${lobbyName}`));
 
     } catch (error) {
@@ -598,13 +593,11 @@ export default function ArenaPage() {
     
     teamLobbyRef.current = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
     
-    // Set up a listener for my personal battle ID before I even join the lobby.
-    const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
-    playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (snapshot) => {
+    playerBattleListenerUnsubscribe.current = onValue(ref(rtdb, `playerBattles/${player.id}`), (snapshot) => {
         const newBattleId = snapshot.val();
         if (newBattleId) {
             setBattleId(newBattleId);
-            remove(playerBattleRef); // Clean up temp node
+            remove(ref(rtdb, `playerBattles/${player.id}`));
         }
     });
 
@@ -618,18 +611,21 @@ export default function ArenaPage() {
         if(data){
             setTeamLobbyData(data);
             
-            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null) as TeamLobbyPlayer[];
-            const redTeam = Object.values(data.red || {}).filter(p => p !== null) as TeamLobbyPlayer[];
+            if (data.status === 'starting') return;
             
+            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null);
+            const redTeam = Object.values(data.red || {}).filter(p => p !== null);
             const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
-            // The first player to join (or any player) can be designated to start the match
-            const amIStarter = [...blueTeam, ...redTeam].sort((a,b) => a.id.localeCompare(b.id))[0]?.id === player.id;
             
-            if (isLobbyFull && amIStarter && data.status === 'waiting') {
+            const anyPlayerIsMe = [...blueTeam, ...redTeam].some(p => p?.id === player.id);
+
+            if (isLobbyFull && anyPlayerIsMe && data.status === 'waiting') {
                 const lobbyStatusRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/status`);
                 rtdbRunTransaction(lobbyStatusRef, (currentStatus) => {
-                    if (currentStatus === 'waiting') return 'starting';
-                    return; // Abort transaction
+                    if (currentStatus === 'waiting') {
+                        return 'starting';
+                    }
+                    return; // Abort transaction if status is not 'waiting'
                 }).then(({ committed }) => {
                     if (committed) {
                         startTeamBattle(lobbyName, data);
@@ -1178,3 +1174,6 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+
+    
