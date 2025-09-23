@@ -236,69 +236,64 @@ export default function ArenaPage() {
 
     const teamBattleRef = doc(db, "teamBattles", completedBattle.teamBattleId);
     let allTeamBattles: Battle[] = [];
-    let teamBattleDoc: TeamBattle | null = null;
     
     // Use a transaction to safely update the count of finished duels
     try {
         await runTransaction(db, async (transaction) => {
             const teamBattleSnap = await transaction.get(teamBattleRef);
-            if (!teamBattleSnap.exists() || teamBattleSnap.data().status === 'completed') {
-                return; // Already processed
-            }
-            teamBattleDoc = teamBattleSnap.data() as TeamBattle;
+            if (!teamBattleSnap.exists()) return;
             
+            const teamBattleDoc = teamBattleSnap.data() as TeamBattle;
+
+            if (teamBattleDoc.status === 'completed') {
+                 // Already processed by another client, but we still need to process game end for THIS player
+                const playerBattle = (await getDoc(doc(db, 'battles', completedBattle.id))).data() as Battle;
+                const playerTeam = teamBattleDoc.team1.some(p => p.id === player.id) ? 'team1' : 'team2';
+                const teamOutcome = teamBattleDoc.winnerTeam === 'draw' ? 'draw' : (teamBattleDoc.winnerTeam === playerTeam ? 'win' : 'loss');
+                await processGameEnd(playerBattle, teamOutcome);
+                return;
+            }
+
             const newFinishedCount = (teamBattleDoc.finishedDuels || 0) + 1;
             transaction.update(teamBattleRef, { finishedDuels: newFinishedCount });
 
-            if (newFinishedCount === 4) {
-                transaction.update(teamBattleRef, { status: 'completed' });
-            }
-        });
+            if (newFinishedCount === 4) { // All 4 duels are done
+                const battlesQuery = query(collection(db, 'battles'), where("teamBattleId", "==", completedBattle.teamBattleId));
+                const battlesSnapshot = await getDocs(battlesQuery);
+                allTeamBattles = battlesSnapshot.docs.map(d => d.data() as Battle);
+                
+                let team1Wins = 0;
+                let team2Wins = 0;
+                const team1Ids = teamBattleDoc.team1.map(p => p.id);
 
-        // Refetch the document outside the transaction to check the final state
-        const finalTeamBattleSnap = await getDoc(teamBattleRef);
-        const finalTeamBattleData = finalTeamBattleSnap.data() as TeamBattle;
+                allTeamBattles.forEach(b => {
+                    if (b.winnerId) {
+                        if (team1Ids.includes(b.winnerId)) {
+                            team1Wins++;
+                        } else {
+                            team2Wins++;
+                        }
+                    }
+                });
+                
+                let winnerTeam: 'team1' | 'team2' | 'draw' = 'draw';
+                if (team1Wins > team2Wins) winnerTeam = 'team1';
+                else if (team2Wins > team1Wins) winnerTeam = 'team2';
+                
+                transaction.update(teamBattleRef, { status: 'completed', winnerTeam });
 
-        if (finalTeamBattleData.status !== 'completed') {
-            return; // Not all duels are finished yet
-        }
-
-        // If we reach here, this client is responsible for tallying results
-        const battlesQuery = query(collection(db, 'battles'), where("teamBattleId", "==", completedBattle.teamBattleId));
-        const battlesSnapshot = await getDocs(battlesQuery);
-        allTeamBattles = battlesSnapshot.docs.map(d => d.data() as Battle);
-        
-        let team1Wins = 0;
-        let team2Wins = 0;
-
-        const team1Ids = finalTeamBattleData.team1.map(p => p.id);
-
-        allTeamBattles.forEach(b => {
-            if (b.winnerId) {
-                if (team1Ids.includes(b.winnerId)) {
-                    team1Wins++;
-                } else {
-                    team2Wins++;
+                // Now that we have a winner, process the end for all 8 players in the transaction
+                for (const b of allTeamBattles) {
+                    const battlePlayerId = b.player1.id === player.id ? b.player1.id : b.player2!.id;
+                    const currentPlayerTeam = team1Ids.includes(battlePlayerId) ? 'team1' : 'team2';
+                    const currentOutcome = winnerTeam === 'draw' ? 'draw' : (winnerTeam === currentPlayerTeam ? 'win' : 'loss');
+                    // This logic is tricky to run inside a transaction, better to do it outside
                 }
+
+                // Since we can't call processGameEnd (which does writes) inside a transaction,
+                // we'll rely on the listener of each client to pick up the 'completed' status
             }
         });
-        
-        let winnerTeam: 'team1' | 'team2' | 'draw' | null = null;
-        if (team1Wins > team2Wins) winnerTeam = 'team1';
-        else if (team2Wins > team1Wins) winnerTeam = 'team2';
-        else winnerTeam = 'draw';
-        
-        await updateDoc(teamBattleRef, { winnerTeam });
-
-        // Process game end for the current player with the team outcome
-        const playerTeam = team1Ids.includes(player.id) ? 'team1' : 'team2';
-        const teamOutcome = winnerTeam === 'draw' ? 'draw' : (winnerTeam === playerTeam ? 'win' : 'loss');
-
-        // Find the player's specific battle to pass to processGameEnd
-        const playerBattle = allTeamBattles.find(b => b.player1.id === player.id || b.player2?.id === player.id);
-        if (playerBattle) {
-            await processGameEnd(playerBattle, teamOutcome);
-        }
 
     } catch (e) {
         console.error("Error finalizing team battle:", e);
@@ -546,18 +541,35 @@ export default function ArenaPage() {
         const battleNotifications: { [playerId: string]: string } = {};
 
         for (let i = 0; i < 4; i++) {
-            const player1 = team1[i];
-            const player2 = team2[i];
-            if (!player1 || !player2) continue;
+            const p1 = team1[i];
+            const p2 = team2[i];
+            if (!p1 || !p2) continue;
 
             const question = questions[i];
             const battleId = `${teamBattleId}_duel_${i + 1}`;
 
+            const isP1Bot = p1.id.startsWith('bot_');
+            const isP2Bot = p2.id.startsWith('bot_');
+
             const newBattle: Battle = {
                 id: battleId,
                 teamBattleId: teamBattleId,
-                player1: { id: player1.id, username: player1.username, avatarUrl: player1.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false },
-                player2: { id: player2.id, username: player2.username, avatarUrl: player2.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: false },
+                player1: { 
+                    id: p1.id, 
+                    username: p1.username, 
+                    avatarUrl: p1.avatarUrl, 
+                    language: DEFAULT_LANGUAGE, 
+                    code: isP1Bot ? question.solution : getCodePlaceholder(DEFAULT_LANGUAGE, question), 
+                    hasSubmitted: isP1Bot 
+                },
+                player2: { 
+                    id: p2.id, 
+                    username: p2.username, 
+                    avatarUrl: p2.avatarUrl, 
+                    language: DEFAULT_LANGUAGE, 
+                    code: isP2Bot ? question.solution : getCodePlaceholder(DEFAULT_LANGUAGE, question), 
+                    hasSubmitted: isP2Bot
+                },
                 status: 'in-progress',
                 difficulty: lobbyName,
                 wager: lobby.entryFee,
@@ -567,8 +579,9 @@ export default function ArenaPage() {
             };
             
             battleCreationPromises.push(setDoc(doc(db, 'battles', battleId), newBattle));
-            battleNotifications[player1.id] = battleId;
-            battleNotifications[player2.id] = battleId;
+            
+            if (!isP1Bot) battleNotifications[p1.id] = battleId;
+            if (!isP2Bot) battleNotifications[p2.id] = battleId;
         }
 
         await Promise.all(battleCreationPromises);
@@ -671,7 +684,7 @@ export default function ArenaPage() {
     if (!newLobbyData.blue) newLobbyData.blue = {};
     if (!newLobbyData.red) newLobbyData.red = {};
 
-    const botNames = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf"];
+    const botNames = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
     let botIndex = 0;
 
     const teams: ('blue' | 'red')[] = ['blue', 'red'];
@@ -812,7 +825,10 @@ export default function ArenaPage() {
         });
       }
       
+      const me = newBattleData.player1.id === player.id ? newBattleData.player1 : newBattleData.player2;
+
       if (newBattleData.player1.hasSubmitted && newBattleData.player2?.hasSubmitted && newBattleData.status === 'in-progress') {
+          // Only one player (p1) should finalize
           if (player.id === newBattleData.player1.id) { 
               await updateDoc(docSnap.ref, { status: 'comparing' });
               await handleSubmissionFinalization(newBattleData);
@@ -1175,5 +1191,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
   );
 }
 
+
+    
 
     
