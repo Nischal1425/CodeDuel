@@ -507,7 +507,7 @@ export default function ArenaPage() {
               avatarUrl: 'https://placehold.co/100x100.png?text=🤖',
               language: 'javascript' as SupportedLanguage,
               code: question.solution,
-              hasSubmitted: true 
+              hasSubmitted: true
           };
           
           const player1Data = {
@@ -553,12 +553,15 @@ export default function ArenaPage() {
         
         const question = await generateCodingChallenge({ playerRank: player.rank, targetDifficulty: lobbyName });
 
-        const toTeamBattlePlayer = (p: TeamLobbyPlayer): TeamBattlePlayer => ({
-            ...p,
-            language: DEFAULT_LANGUAGE,
-            code: getCodePlaceholder(DEFAULT_LANGUAGE, question),
-            hasSubmitted: false,
-        });
+        const toTeamBattlePlayer = (p: TeamLobbyPlayer): TeamBattlePlayer => {
+             const isBot = p.id.startsWith('bot_');
+             return {
+                ...p,
+                language: DEFAULT_LANGUAGE,
+                code: isBot ? question.solution : getCodePlaceholder(DEFAULT_LANGUAGE, question),
+                hasSubmitted: isBot,
+             };
+        };
 
         const team1 = Object.values(finalLobbyData.blue || {}).filter((p): p is TeamLobbyPlayer => p !== null).map(toTeamBattlePlayer);
         const team2 = Object.values(finalLobbyData.red || {}).filter((p): p is TeamLobbyPlayer => p !== null).map(toTeamBattlePlayer);
@@ -582,7 +585,6 @@ export default function ArenaPage() {
 
         await setDoc(battleDocRef, newBattle);
         
-        // Notify players by updating the lobby object
         const teamLobbyBattleRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/battleId`);
         await set(teamLobbyBattleRef, battleId);
 
@@ -590,7 +592,7 @@ export default function ArenaPage() {
         console.error("Error starting team battle:", error);
         toast({ title: 'Error', description: 'Could not start the team battle.', variant: 'destructive' });
     }
-  }, [player, toast]);
+}, [player, toast]);
 
 
   const setupTeamLobbyListener = useCallback(async (lobbyName: DifficultyLobby) => {
@@ -1291,4 +1293,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     
 
     
+
 
