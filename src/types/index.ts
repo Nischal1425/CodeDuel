@@ -1,5 +1,6 @@
 
 
+
 import type { ElementType } from 'react';
 import type { GenerateCodingChallengeOutput } from '@/ai/flows/generate-coding-challenge';
 import type { CompareCodeSubmissionsOutput } from '@/ai/flows/compare-code-submissions';
@@ -80,10 +81,13 @@ export interface TeamLobby {
 
 export interface TeamBattle {
     id: string;
-    team1: TeamLobbyPlayer[];
-    team2: TeamLobbyPlayer[];
+    team1: TeamBattlePlayer[];
+    team2: TeamBattlePlayer[];
+    team1Score: number;
+    team2Score: number;
     status: 'in-progress' | 'completed';
     difficulty: 'easy' | 'medium' | 'hard';
+    question: GenerateCodingChallengeOutput;
     createdAt: any; // Firestore Timestamp
     finishedDuels: number;
     winnerTeam: 'team1' | 'team2' | 'draw' | null;
