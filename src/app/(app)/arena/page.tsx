@@ -774,7 +774,6 @@ export default function ArenaPage() {
   const onCreateCustomLobby = async (lobbyName: DifficultyLobby) => {
     if (!player || !rtdb) return;
     
-    setSelectedLobbyName(lobbyName);
     const lobbyCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newLobby: TeamLobby = {
         id: lobbyCode,
@@ -785,12 +784,13 @@ export default function ArenaPage() {
     const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
     await set(lobbyRef, newLobby);
     
+    setSelectedLobbyName(lobbyName);
     setCustomLobbyId(lobbyCode);
     setupTeamLobbyListener(lobbyCode);
   };
   
   const onJoinCustomLobby = async (lobbyCode: string) => {
-     if (!player || !rtdb) return;
+     if (!player || !rtdb || !lobbyCode) return;
      const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
      const snapshot = await get(lobbyRef);
      if (snapshot.exists()) {
@@ -840,7 +840,7 @@ export default function ArenaPage() {
     } else {
         for (const team of ['blue', 'red'] as const) {
             for (const slot of ['1', '2', '3', '4'] as const) {
-                const currentPlayer = teamLobbyData?.teams[team][slot];
+                const currentPlayer = teamLobbyData?.teams?.[team]?.[slot];
                 if (currentPlayer?.id === player.id) {
                     await set(ref(rtdb, `customLobbies/${customLobbyId}/teams/${team}/${slot}`), null);
                     break;
@@ -1198,27 +1198,41 @@ export default function ArenaPage() {
                 />
             );
         case 'inGame':
-        case 'inTeamGame':
-            if (!battleData) {
+            if (!battleData || !player) {
                 return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading match...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
             }
-            if (battleData && player) {
-              return (
-                  <DuelView
-                      battleData={battleData}
-                      player={player}
-                      timeRemaining={timeRemaining}
-                      code={code}
-                      onCodeChange={setCode}
-                      language={language}
-                      onLanguageChange={onLanguageChange}
-                      onSubmitCode={handleSubmitCode}
-                      onTimeUp={handleTimeUp}
-                      onForfeit={() => setShowLeaveConfirm(true)}
-                  />
-              );
+            return (
+                <DuelView
+                    battleData={battleData}
+                    player={player}
+                    timeRemaining={timeRemaining}
+                    code={code}
+                    onCodeChange={setCode}
+                    language={language}
+                    onLanguageChange={onLanguageChange}
+                    onSubmitCode={handleSubmitCode}
+                    onTimeUp={handleTimeUp}
+                    onForfeit={() => setShowLeaveConfirm(true)}
+                />
+            );
+        case 'inTeamGame':
+            if (!battleData || !teamBattleData || !player) {
+                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading team match...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
             }
-            return null;
+            return (
+                <TeamBattleView
+                    battleData={teamBattleData}
+                    player={player}
+                    timeRemaining={timeRemaining}
+                    code={code}
+                    onCodeChange={setCode}
+                    language={language}
+                    onLanguageChange={onLanguageChange}
+                    onSubmitCode={handleSubmitCode}
+                    onTimeUp={handleTimeUp}
+                    onForfeit={() => setShowLeaveConfirm(true)}
+                />
+            );
         case 'submittingComparison':
             return (
                 <div className="flex flex-col items-center justify-center h-full text-center p-4">
@@ -1296,5 +1310,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
