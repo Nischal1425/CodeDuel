@@ -498,8 +498,6 @@ export default function ArenaPage() {
                 for (const slot of ['1', '2', '3', '4'] as const) {
                     if (!lobbyData.teams[team][slot]) {
                         await handleJoinTeam(team, slot, lobbyDoc.id);
-                        setCustomLobbyId(lobbyDoc.id);
-                        setupTeamLobbyListener(lobbyDoc.id, true);
                         return; // Exit after joining
                     }
                 }
@@ -799,8 +797,8 @@ export default function ArenaPage() {
     
     setSelectedLobbyName(lobbyName);
     setCustomLobbyId(lobbyCode);
-    setGameState('inCustomLobby');
     setupTeamLobbyListener(lobbyCode);
+    setGameState('inCustomLobby');
   };
   
   const onJoinCustomLobby = async (lobbyCode: string) => {
@@ -811,16 +809,18 @@ export default function ArenaPage() {
          setSelectedLobbyName(LOBBIES.find(l=>l.gameMode === '4v4')?.name || 'medium');
          setCustomLobbyId(lobbyCode);
          setupTeamLobbyListener(lobbyCode);
-         setGameState('inCustomLobby');
      } else {
          toast({ title: 'Not Found', description: 'Lobby code is invalid or has expired.', variant: 'destructive'});
      }
   };
   
   const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4', lobbyId?: string) => {
-      if (!player || !(customLobbyId || lobbyId) || !rtdb) return;
-      const id = customLobbyId || lobbyId;
-      if (!id) return;
+      if (!player || !rtdb) return;
+      const id = lobbyId || customLobbyId;
+      if (!id) {
+        toast({ title: "Error", description: "Lobby ID not found.", variant: "destructive"});
+        return;
+      }
       
       const slotRef = ref(rtdb, `customLobbies/${id}/teams/${team}/${slot}`);
       
@@ -833,6 +833,8 @@ export default function ArenaPage() {
 
       try {
         await set(slotRef, newPlayerInSlot);
+        setCustomLobbyId(id);
+        setupTeamLobbyListener(id);
       } catch (error) {
         console.error("Failed to join team slot", error);
         toast({ title: "Error", description: "Could not join the team.", variant: "destructive"});
@@ -881,7 +883,15 @@ export default function ArenaPage() {
     const lobbyRef = ref(rtdb, `customLobbies/${customLobbyId}`);
     
     const transactionResult = await rtdbRunTransaction(lobbyRef, (currentLobbyData: TeamLobby) => {
-        if (!currentLobbyData) return;
+        if (!currentLobbyData) return currentLobbyData;
+
+        // Ensure teams object exists
+        if (!currentLobbyData.teams) {
+          currentLobbyData.teams = {
+            blue: { '1': null, '2': null, '3': null, '4': null },
+            red: { '1': null, '2': null, '3': null, '4': null },
+          };
+        }
 
         for (const team of ['blue', 'red'] as const) {
             for (const slot of ['1', '2', '3', '4'] as const) {
@@ -1330,9 +1340,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
-
-    
