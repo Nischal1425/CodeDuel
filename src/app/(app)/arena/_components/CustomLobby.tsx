@@ -66,7 +66,7 @@ function TeamSlot({ slot, playerInfo, onJoin, teamName, disabled, isHost }: { sl
 }
 
 
-function TeamCard({ teamName, teamData, onJoin, disabled, hostId }: { teamName: 'Blue' | 'Red'; teamData: TeamLobby['blue'] | TeamLobby['red']; onJoin: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void; disabled?: boolean; hostId?: string; }) {
+function TeamCard({ teamName, teamData, onJoin, disabled, hostId }: { teamName: 'Blue' | 'Red'; teamData: TeamLobby['teams']['blue'] | TeamLobby['teams']['red']; onJoin: (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => void; disabled?: boolean; hostId?: string; }) {
     const teamColor = teamName === 'Blue' ? 'blue' : 'red';
     
     return (
@@ -95,8 +95,8 @@ export function CustomLobby({ player, lobbyData, lobbyCode, onJoinTeam, onLeave,
     }
     
     const allPlayersInLobby = [
-        ...Object.values(lobbyData.teams.blue || {}),
-        ...Object.values(lobbyData.teams.red || {})
+        ...Object.values(lobbyData.teams?.blue || {}),
+        ...Object.values(lobbyData.teams?.red || {})
     ].filter((p): p is TeamLobbyPlayer => p !== null);
 
     const isPlayerInLobby = allPlayersInLobby.some(p => p?.id === player.id);
@@ -134,8 +134,8 @@ export function CustomLobby({ player, lobbyData, lobbyCode, onJoinTeam, onLeave,
                     </Card>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <TeamCard teamName="Blue" teamData={lobbyData.teams.blue || {}} onJoin={onJoinTeam} disabled={isPlayerInLobby} hostId={lobbyData.hostId} />
-                        <TeamCard teamName="Red" teamData={lobbyData.teams.red || {}} onJoin={onJoinTeam} disabled={isPlayerInLobby} hostId={lobbyData.hostId} />
+                        <TeamCard teamName="Blue" teamData={lobbyData.teams?.blue || {}} onJoin={onJoinTeam} disabled={isPlayerInLobby} hostId={lobbyData.hostId} />
+                        <TeamCard teamName="Red" teamData={lobbyData.teams?.red || {}} onJoin={onJoinTeam} disabled={isPlayerInLobby} hostId={lobbyData.hostId} />
                     </div>
                 </CardContent>
                 <CardFooter className="flex-col gap-4 pt-6">
