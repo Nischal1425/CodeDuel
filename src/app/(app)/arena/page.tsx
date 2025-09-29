@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import type { FormEvent } from 'react';
@@ -773,7 +774,6 @@ export default function ArenaPage() {
   const onCreateCustomLobby = async (lobbyName: DifficultyLobby) => {
     if (!player || !rtdb) return;
     
-    setGameState('searching');
     setSelectedLobbyName(lobbyName);
     const lobbyCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const newLobby: TeamLobby = {
