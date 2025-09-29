@@ -1,6 +1,29 @@
+
 {
   "rules": {
-    ".read": "now < 1758738600000",
-    ".write": "now < 1758738600000"
+    "matchmakingQueue": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "teamMatchmakingQueue": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "playerBattles": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    },
+    "playerLobbies": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    },
+    "customLobbies": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
   }
 }
