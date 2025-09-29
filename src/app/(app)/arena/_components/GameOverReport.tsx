@@ -9,19 +9,89 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AlertTriangle, CheckCircle, Swords, Flag, Brain, Coins, FileCode, XCircle } from 'lucide-react';
-import type { Player, Battle } from '@/types';
+import { AlertTriangle, CheckCircle, Swords, Flag, Brain, Coins, FileCode, XCircle, Users } from 'lucide-react';
+import type { Player, Battle, TeamBattle } from '@/types';
 import { CodeEditor } from './CodeEditor';
 import { cn } from '@/lib/utils';
+import { TeamBattleReportDetails } from './TeamBattleReportDetails';
 
 interface GameOverReportProps {
     battleData: Battle | null;
+    teamBattleData: TeamBattle | null;
     player: Player;
     onFindNewMatch: () => void;
 }
 
 
-export function GameOverReport({ battleData, player, onFindNewMatch }: GameOverReportProps) {
+export function GameOverReport({ battleData, teamBattleData, player, onFindNewMatch }: GameOverReportProps) {
+
+    if (teamBattleData) {
+        const playerTeamKey = teamBattleData.team1.some(p => p.id === player.id) ? 'team1' : 'team2';
+        const outcome = teamBattleData.winnerTeam === 'draw' ? 'draw' : (teamBattleData.winnerTeam === playerTeamKey ? 'win' : 'loss');
+
+        let title = "Team Battle Over";
+        let message = "";
+        let icon: React.ReactNode = <Users className="h-16 w-16 text-muted-foreground mx-auto mb-4" />;
+        
+        if (outcome === 'win') {
+            title = "Team Victory!";
+            message = `Your team crushed the opposition!`;
+            icon = <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-4"/>;
+        } else if (outcome === 'draw') {
+            title = "Team Draw!";
+            message = "The team battle ended in a draw.";
+            icon = <Swords className="h-16 w-16 text-yellow-500 mx-auto mb-4"/>;
+        } else {
+            title = "Team Defeat";
+            message = "Your team was defeated. Better luck next time!";
+            icon = <AlertTriangle className="h-16 w-16 text-destructive mx-auto mb-4"/>;
+        }
+
+        return (
+            <div className="container mx-auto py-8 h-full flex flex-col justify-center p-4">
+                <Card>
+                    <CardHeader className="text-center">
+                        {icon}
+                        <CardTitle className="text-3xl font-bold mb-2">{title}</CardTitle>
+                        <CardDescription className="text-lg text-muted-foreground">{message}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="flex justify-around text-center">
+                            <div className={cn("p-4 rounded-lg", outcome === 'win' && playerTeamKey === 'team1' || outcome === 'loss' && playerTeamKey === 'team2' ? 'bg-green-500/10' : '')}>
+                                <p className="text-sm font-bold text-blue-500">BLUE TEAM</p>
+                                <p className="text-3xl font-bold">{teamBattleData.team1Score}</p>
+                            </div>
+                            <div className={cn("p-4 rounded-lg", outcome === 'win' && playerTeamKey === 'team2' || outcome === 'loss' && playerTeamKey === 'team1' ? 'bg-green-500/10' : '')}>
+                                <p className="text-sm font-bold text-red-500">RED TEAM</p>
+                                <p className="text-3xl font-bold">{teamBattleData.team2Score}</p>
+                            </div>
+                        </div>
+
+                         <Accordion type="single" collapsible className="w-full" defaultValue="comparison-details">
+                            <AccordionItem value="comparison-details">
+                                <AccordionTrigger className="text-lg hover:no-underline"><Brain className="mr-2 h-5 w-5 text-primary"/> Detailed Battle Report</AccordionTrigger>
+                                <AccordionContent className="space-y-4 pt-4">
+                                   <TeamBattleReportDetails battle={teamBattleData} />
+                                </AccordionContent>
+                            </AccordionItem>
+                        </Accordion>
+                        
+                        <div className="text-center text-muted-foreground">Your coins: {player?.coins ?? 0} <Coins className="inline h-4 w-4 text-yellow-500 align-baseline"/></div>
+                        <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                            <Button asChild variant="outline" className="w-full">
+                                <Link href="/dashboard">Return to Dashboard</Link>
+                            </Button>
+                            <Button onClick={onFindNewMatch} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
+                                Find New Match
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        )
+
+    }
+
     if (!battleData) {
         return (
             <div className="flex items-center justify-center h-full">
@@ -29,6 +99,7 @@ export function GameOverReport({ battleData, player, onFindNewMatch }: GameOverR
             </div>
         );
     }
+
     const outcome = battleData.winnerId === player?.id ? 'win' : (!battleData.winnerId ? 'draw' : 'loss');
     let title = "Match Over";
     let message = "";
