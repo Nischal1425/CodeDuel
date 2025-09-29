@@ -69,9 +69,10 @@ export interface TeamBattlePlayer extends TeamLobbyPlayer {
 }
 
 export interface TeamLobby {
+    id: string;
     hostId: string;
     isPublic: boolean;
-    status: 'waiting' | 'starting' | 'in-game' | 'completed';
+    status: 'waiting' | 'forming' | 'starting' | 'in-game' | 'completed';
     teams: {
       blue: { [slot: string]: TeamLobbyPlayer | null };
       red: { [slot: string]: TeamLobbyPlayer | null };
@@ -148,3 +149,5 @@ export interface MatchHistoryEntry {
   wager: number;
   date: string; 
 }
+
+    
