@@ -76,7 +76,7 @@ function TeamLobbyCard({ lobby, onCreate, onFind, onJoin, disabled }: { lobby: L
                     <Button className="w-full" onClick={onFind} disabled={disabled}>
                         <Gamepad className="mr-2"/> Find Public Match
                     </Button>
-                    <Button className="w-full" variant="secondary" onClick={onCreate} disabled={disabled}>
+                    <Button className="w-full" onClick={onCreate} disabled={disabled}>
                        <PlusCircle className="mr-2"/> Create Custom Game
                     </Button>
                 </div>
