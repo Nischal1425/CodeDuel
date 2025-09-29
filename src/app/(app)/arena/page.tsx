@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import type { FormEvent } from 'react';
@@ -746,6 +745,10 @@ export default function ArenaPage() {
             setGameState('inCustomLobby');
         }
 
+        if (!data.teams) {
+            return; 
+        }
+
         const allPlayers = [...Object.values(data.teams.blue), ...Object.values(data.teams.red)].filter(p => p !== null);
         if (data.status === 'forming' && allPlayers.length === 8) {
             if (data.hostId === player.id) { // Only host starts the battle
@@ -855,7 +858,6 @@ export default function ArenaPage() {
     const botNames = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india"];
     let botIndex = 0;
 
-    const updates: { [key: string]: TeamLobbyPlayer | null } = {};
     const lobbyRef = ref(rtdb, `customLobbies/${customLobbyId}`);
     
     const transactionResult = await rtdbRunTransaction(lobbyRef, (currentLobbyData: TeamLobby) => {
