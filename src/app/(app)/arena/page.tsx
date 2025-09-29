@@ -482,9 +482,33 @@ export default function ArenaPage() {
     setGameState('searching');
     setSelectedLobbyName(lobbyName);
 
-    const lobbyQueueRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
+    const teamQueueRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
+    
+    // Check for open public lobbies first
+    const publicLobbiesRef = query(collection(db, 'customLobbies'), where('isPublic', '==', true), where('status', '==', 'waiting'));
+    const publicLobbiesSnap = await getDocs(publicLobbiesRef as any);
 
-    // Listen for my lobby assignment
+    for (const lobbyDoc of publicLobbiesSnap.docs) {
+        const lobbyData = lobbyDoc.data() as TeamLobby;
+        const allPlayers = [...Object.values(lobbyData.teams.blue), ...Object.values(lobbyData.teams.red)].filter(p => p);
+        if (allPlayers.length < 8) {
+            // Found a lobby with space, try to join it
+            // Simple approach: just join the first available slot
+            for (const team of ['blue', 'red'] as const) {
+                for (const slot of ['1', '2', '3', '4'] as const) {
+                    if (!lobbyData.teams[team][slot]) {
+                        await handleJoinTeam(team, slot, lobbyDoc.id);
+                        setCustomLobbyId(lobbyDoc.id);
+                        setupTeamLobbyListener(lobbyDoc.id, true);
+                        return; // Exit after joining
+                    }
+                }
+            }
+        }
+    }
+
+
+    // No open public lobby, join the matchmaking queue
     const playerLobbyRef = ref(rtdb, `playerLobbies/${player.id}`);
     const unsubscribePlayerLobby = onValue(playerLobbyRef, (snapshot) => {
         const lobbyId = snapshot.val();
@@ -496,52 +520,41 @@ export default function ArenaPage() {
         }
     });
 
-    // Transaction to join or create a team lobby
-    rtdbRunTransaction(lobbyQueueRef, (queue) => {
+    rtdbRunTransaction(teamQueueRef, (queue) => {
         if (queue === null) queue = {};
         
-        // Add self to queue
         queue[player.id] = { id: player.id, username: player.username, avatarUrl: player.avatarUrl, rating: player.rating, joinedAt: rtdbServerTimestamp() };
 
         if (Object.keys(queue).length >= 8) {
             const players = Object.values(queue).slice(0, 8);
             players.forEach((p: any) => delete queue[p.id]);
 
-            // This part runs outside the transaction flow but after it commits
             (async () => {
                 const teamLobbyId = `team-lobby-${Date.now()}`;
                 const newLobbyRef = ref(rtdb, `customLobbies/${teamLobbyId}`);
-                
                 const playersData = (players as TeamLobbyPlayer[]).sort((a, b) => a.rating - b.rating);
 
                 const newLobby: TeamLobby = {
                     id: teamLobbyId,
-                    hostId: playersData[0].id, // Assign host to first player
+                    hostId: playersData[0].id,
                     isPublic: true,
                     status: 'forming',
                     teams: {
-                        blue: {
-                            '1': playersData[0], '2': playersData[2], '3': playersData[4], '4': playersData[6]
-                        },
-                        red: {
-                            '1': playersData[1], '2': playersData[3], '3': playersData[5], '4': playersData[7]
-                        }
+                        blue: { '1': playersData[0], '2': playersData[2], '3': playersData[4], '4': playersData[6] },
+                        red: { '1': playersData[1], '2': playersData[3], '3': playersData[5], '4': playersData[7] }
                     }
                 };
 
                 await set(newLobbyRef, newLobby);
 
                 const playerLobbyUpdates: { [key: string]: string } = {};
-                playersData.forEach(p => {
-                    playerLobbyUpdates[`/playerLobbies/${p.id}`] = teamLobbyId;
-                });
+                playersData.forEach(p => { playerLobbyUpdates[`/playerLobbies/${p.id}`] = teamLobbyId; });
                 await update(ref(rtdb), playerLobbyUpdates);
             })();
         }
-        playerQueueRef.current = child(lobbyQueueRef, player.id);
+        playerQueueRef.current = child(teamQueueRef, player.id);
         return queue;
     });
-
   }, [player, toast]);
 
  const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
@@ -746,7 +759,7 @@ export default function ArenaPage() {
             setGameState('inCustomLobby');
         }
 
-        if (!data.teams) {
+        if (!data.teams || !data.teams.blue || !data.teams.red) {
             return; 
         }
 
@@ -786,6 +799,7 @@ export default function ArenaPage() {
     
     setSelectedLobbyName(lobbyName);
     setCustomLobbyId(lobbyCode);
+    setGameState('inCustomLobby');
     setupTeamLobbyListener(lobbyCode);
   };
   
@@ -797,14 +811,18 @@ export default function ArenaPage() {
          setSelectedLobbyName(LOBBIES.find(l=>l.gameMode === '4v4')?.name || 'medium');
          setCustomLobbyId(lobbyCode);
          setupTeamLobbyListener(lobbyCode);
+         setGameState('inCustomLobby');
      } else {
          toast({ title: 'Not Found', description: 'Lobby code is invalid or has expired.', variant: 'destructive'});
      }
   };
   
-  const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => {
-      if (!player || !customLobbyId || !rtdb) return;
-      const slotRef = ref(rtdb, `customLobbies/${customLobbyId}/teams/${team}/${slot}`);
+  const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4', lobbyId?: string) => {
+      if (!player || !(customLobbyId || lobbyId) || !rtdb) return;
+      const id = customLobbyId || lobbyId;
+      if (!id) return;
+      
+      const slotRef = ref(rtdb, `customLobbies/${id}/teams/${team}/${slot}`);
       
       const newPlayerInSlot: TeamLobbyPlayer = {
           id: player.id,
@@ -838,12 +856,14 @@ export default function ArenaPage() {
     if (teamLobbyData?.hostId === player.id) {
         await remove(ref(rtdb, `customLobbies/${customLobbyId}`));
     } else {
-        for (const team of ['blue', 'red'] as const) {
-            for (const slot of ['1', '2', '3', '4'] as const) {
-                const currentPlayer = teamLobbyData?.teams?.[team]?.[slot];
-                if (currentPlayer?.id === player.id) {
-                    await set(ref(rtdb, `customLobbies/${customLobbyId}/teams/${team}/${slot}`), null);
-                    break;
+        if(teamLobbyData?.teams) {
+            for (const team of ['blue', 'red'] as const) {
+                for (const slot of ['1', '2', '3', '4'] as const) {
+                    const currentPlayer = teamLobbyData?.teams?.[team]?.[slot];
+                    if (currentPlayer?.id === player.id) {
+                        await set(ref(rtdb, `customLobbies/${customLobbyId}/teams/${team}/${slot}`), null);
+                        break;
+                    }
                 }
             }
         }
@@ -1310,6 +1330,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
