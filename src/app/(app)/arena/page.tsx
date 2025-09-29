@@ -13,7 +13,7 @@ import { generateCodingChallenge } from '@/ai/flows/generate-coding-challenge';
 import { compareTeamSubmissions } from '@/ai/flows/compare-team-submissions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from "@/hooks/use-toast";
-import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamLobbyPlayer } from '@/types';
+import type { Player, MatchHistoryEntry, SupportedLanguage, Battle, TeamBattle, TeamLobby, TeamLobbyPlayer, GameMode } from '@/types';
 import { ToastAction } from "@/components/ui/toast";
 import { cn } from '@/lib/utils';
 import { checkAchievementsOnMatchEnd } from '@/lib/achievement-logic';
@@ -476,171 +476,17 @@ export default function ArenaPage() {
     });
   }, [player, toast, resetGameState]);
 
- const onFindPublicTeamMatch = useCallback(async (lobbyName: DifficultyLobby) => {
-    if (!player || !rtdb) return;
-    goOnline(rtdb);
-    setGameState('searching');
-    setSelectedLobbyName(lobbyName);
-
-    const teamQueueRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
-    
-    // Check for open public lobbies first
-    const publicLobbiesRef = query(collection(db, 'customLobbies'), where('isPublic', '==', true), where('status', '==', 'waiting'));
-    const publicLobbiesSnap = await getDocs(publicLobbiesRef as any);
-
-    for (const lobbyDoc of publicLobbiesSnap.docs) {
-        const lobbyData = lobbyDoc.data() as TeamLobby;
-        const allPlayers = [...Object.values(lobbyData.teams.blue), ...Object.values(lobbyData.teams.red)].filter(p => p);
-        if (allPlayers.length < 8) {
-            // Found a lobby with space, try to join it
-            // Simple approach: just join the first available slot
-            for (const team of ['blue', 'red'] as const) {
-                for (const slot of ['1', '2', '3', '4'] as const) {
-                    if (!lobbyData.teams[team][slot]) {
-                        await handleJoinTeam(team, slot, lobbyDoc.id);
-                        return; // Exit after joining
-                    }
-                }
-            }
-        }
-    }
-
-
-    // No open public lobby, join the matchmaking queue
-    const playerLobbyRef = ref(rtdb, `playerLobbies/${player.id}`);
-    const unsubscribePlayerLobby = onValue(playerLobbyRef, (snapshot) => {
-        const lobbyId = snapshot.val();
-        if (lobbyId) {
-            unsubscribePlayerLobby();
-            remove(playerLobbyRef);
-            setCustomLobbyId(lobbyId);
-            setupTeamLobbyListener(lobbyId, true);
-        }
-    });
-
-    rtdbRunTransaction(teamQueueRef, (queue) => {
-        if (queue === null) queue = {};
-        
-        queue[player.id] = { id: player.id, username: player.username, avatarUrl: player.avatarUrl, rating: player.rating, joinedAt: rtdbServerTimestamp() };
-
-        if (Object.keys(queue).length >= 8) {
-            const players = Object.values(queue).slice(0, 8);
-            players.forEach((p: any) => delete queue[p.id]);
-
-            (async () => {
-                const teamLobbyId = `team-lobby-${Date.now()}`;
-                const newLobbyRef = ref(rtdb, `customLobbies/${teamLobbyId}`);
-                const playersData = (players as TeamLobbyPlayer[]).sort((a, b) => a.rating - b.rating);
-
-                const newLobby: TeamLobby = {
-                    id: teamLobbyId,
-                    hostId: playersData[0].id,
-                    isPublic: true,
-                    status: 'forming',
-                    teams: {
-                        blue: { '1': playersData[0], '2': playersData[2], '3': playersData[4], '4': playersData[6] },
-                        red: { '1': playersData[1], '2': playersData[3], '3': playersData[5], '4': playersData[7] }
-                    }
-                };
-
-                await set(newLobbyRef, newLobby);
-
-                const playerLobbyUpdates: { [key: string]: string } = {};
-                playersData.forEach(p => { playerLobbyUpdates[`/playerLobbies/${p.id}`] = teamLobbyId; });
-                await update(ref(rtdb), playerLobbyUpdates);
-            })();
-        }
-        playerQueueRef.current = child(teamQueueRef, player.id);
-        return queue;
-    });
-  }, [player, toast]);
-
- const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
-    if (!player || !rtdb || !IS_FIREBASE_CONFIGURED || !customLobbyId) return;
-
-    try {
-        const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
-        if (!lobby) throw new Error("Lobby configuration not found.");
-
-        await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'starting');
-
-        const [q1, q2, q3, q4] = await Promise.all([
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-        ]);
-
-        const team1 = Object.values(finalLobbyData.teams.blue).filter((p): p is TeamLobbyPlayer => p !== null);
-        const team2 = Object.values(finalLobbyData.teams.red).filter((p): p is TeamLobbyPlayer => p !== null);
-        const questions = [q1, q2, q3, q4];
-        
-        const teamBattleId = `team-battle-${Date.now()}`;
-        
-        const batch = writeBatch(db);
-        
-        const teamBattleRef = doc(db, "teamBattles", teamBattleId);
-        batch.set(teamBattleRef, {
-            id: teamBattleId,
-            team1: team1.map(p => ({...p, code: '', hasSubmitted: false, language: DEFAULT_LANGUAGE})),
-            team2: team2.map(p => ({...p, code: '', hasSubmitted: false, language: DEFAULT_LANGUAGE})),
-            team1Score: 0,
-            team2Score: 0,
-            status: 'in-progress',
-            difficulty: lobbyName,
-            createdAt: serverTimestamp(),
-            finishedDuels: 0,
-            winnerTeam: null
-        });
-
-        const rtdbUpdates: { [key: string]: any } = {};
-
-        for (let i = 0; i < 4; i++) {
-            const p1 = team1[i];
-            const p2 = team2[i];
-            const question = questions[i];
-            if (!p1 || !p2) continue;
-
-            const isBot1 = p1.id.startsWith('bot_');
-            const isBot2 = p2.id.startsWith('bot_');
-            
-            const battleId = `${teamBattleId}_slot${i+1}`;
-            const battleDocRef = doc(db, 'battles', battleId);
-
-            const newBattle: Battle = {
-                id: battleId,
-                teamBattleId: teamBattleId,
-                player1: { id: p1.id, username: p1.username, avatarUrl: p1.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: isBot1, ...(isBot1 && {code: question.solution}) },
-                player2: { id: p2.id, username: p2.username, avatarUrl: p2.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: isBot2, ...(isBot2 && {code: question.solution}) },
-                status: 'in-progress',
-                difficulty: lobbyName,
-                wager: lobby.entryFee,
-                question,
-                createdAt: serverTimestamp(),
-                startedAt: serverTimestamp(),
-            };
-            batch.set(battleDocRef, newBattle);
-            
-            rtdbUpdates[`/playerBattles/${p1.id}`] = battleId;
-            rtdbUpdates[`/playerBattles/${p2.id}`] = battleId;
-        }
-
-        await batch.commit();
-        rtdbUpdates[`/customLobbies/${customLobbyId}`] = null;
-        await update(ref(rtdb), rtdbUpdates);
-
-    } catch (error) {
-        console.error("Error starting team battle:", error);
-        toast({ title: 'Error', description: 'Could not start the team battle.', variant: 'destructive' });
-        if(customLobbyId) await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'waiting');
-    }
-}, [player, toast, customLobbyId]);
-
-  const onLobbySelect = async (lobby: LobbyInfo) => {
+  const handleLobbyAction = async (lobbyName: DifficultyLobby, gameMode: GameMode, action: 'find' | 'create' | 'join', joinCode?: string) => {
     if (!player) {
-      toast({ title: "Not Logged In", description: "You must be logged in to play.", variant: "destructive" });
-      return;
+        toast({ title: "Not Logged In", description: "You must be logged in to play.", variant: "destructive" });
+        return;
     }
+    const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === gameMode);
+    if (!lobby) {
+        toast({ title: "Error", description: "Invalid lobby selected.", variant: "destructive" });
+        return;
+    }
+
     if (player.coins < lobby.entryFee) {
         toast({
             title: "Insufficient Coins",
@@ -650,37 +496,50 @@ export default function ArenaPage() {
         });
         return;
     }
-
+    
     try {
-        const playerRef = doc(db, "players", player.id);
-        await runTransaction(db, async (transaction) => {
-            const playerSnap = await transaction.get(playerRef);
-            if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) {
-                throw new Error("Insufficient coins.");
-            }
-            const newCoins = playerSnap.data().coins - lobby.entryFee;
-            transaction.update(playerRef, { coins: newCoins });
-        });
-
-        setGameState('searching');
-        setSelectedLobbyName(lobby.name);
         if (IS_FIREBASE_CONFIGURED) {
-            await findMatch(lobby);
-        } else {
-            startBotMatch(lobby);
+            const playerRef = doc(db, "players", player.id);
+            await runTransaction(db, async (transaction) => {
+                const playerSnap = await transaction.get(playerRef);
+                if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) {
+                    throw new Error("Insufficient coins.");
+                }
+                const newCoins = playerSnap.data().coins - lobby.entryFee;
+                transaction.update(playerRef, { coins: newCoins });
+            });
         }
 
+        setSelectedLobbyName(lobby.name);
+
+        if (gameMode === '1v1') {
+            setGameState('searching');
+            if (IS_FIREBASE_CONFIGURED) {
+                await findMatch(lobby);
+            } else {
+                startBotMatch(lobby);
+            }
+        } else { // 4v4
+            if (action === 'create') {
+                await onCreateCustomLobby(lobby.name);
+            } else if (action === 'find') {
+                await onFindPublicTeamMatch(lobby.name);
+            } else if (action === 'join' && joinCode) {
+                await onJoinCustomLobby(joinCode);
+            }
+        }
     } catch (error) {
-        console.error("Transaction failed: ", error);
+        console.error("Lobby action failed: ", error);
         toast({
-            title: "Transaction Failed",
+            title: "Lobby Action Failed",
             description: (error as Error).message === "Insufficient coins."
                 ? "You don't have enough coins."
-                : "Could not deduct entry fee.",
+                : "Could not perform lobby action.",
             variant: "destructive",
         });
     }
   };
+
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
       if (!player) return;
@@ -795,20 +654,96 @@ export default function ArenaPage() {
     const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
     await set(lobbyRef, newLobby);
     
-    setSelectedLobbyName(lobbyName);
     setCustomLobbyId(lobbyCode);
     setupTeamLobbyListener(lobbyCode);
     setGameState('inCustomLobby');
   };
+
+   const onFindPublicTeamMatch = useCallback(async (lobbyName: DifficultyLobby) => {
+    if (!player || !rtdb) return;
+    goOnline(rtdb);
+    setGameState('searching');
+
+    const teamQueueRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
+    
+    // Check for open public lobbies first
+    const publicLobbiesRef = query(collection(db, 'customLobbies'), where('isPublic', '==', true), where('status', '==', 'waiting'));
+    const publicLobbiesSnap = await getDocs(publicLobbiesRef as any);
+
+    for (const lobbyDoc of publicLobbiesSnap.docs) {
+        const lobbyData = lobbyDoc.data() as TeamLobby;
+        const allPlayers = [...Object.values(lobbyData.teams.blue || {}), ...Object.values(lobbyData.teams.red || {})].filter(p => p);
+        if (allPlayers.length < 8) {
+            // Found a lobby with space, try to join it
+            for (const team of ['blue', 'red'] as const) {
+                for (const slot of ['1', '2', '3', '4'] as const) {
+                    if (!lobbyData.teams[team][slot]) {
+                        await handleJoinTeam(team, slot, lobbyDoc.id);
+                        return; // Exit after joining
+                    }
+                }
+            }
+        }
+    }
+
+
+    // No open public lobby, join the matchmaking queue
+    const playerLobbyRef = ref(rtdb, `playerLobbies/${player.id}`);
+    const unsubscribePlayerLobby = onValue(playerLobbyRef, (snapshot) => {
+        const lobbyId = snapshot.val();
+        if (lobbyId) {
+            unsubscribePlayerLobby();
+            remove(playerLobbyRef);
+            setCustomLobbyId(lobbyId);
+            setupTeamLobbyListener(lobbyId, true);
+        }
+    });
+
+    rtdbRunTransaction(teamQueueRef, (queue) => {
+        if (queue === null) queue = {};
+        
+        queue[player.id] = { id: player.id, username: player.username, avatarUrl: player.avatarUrl, rating: player.rating, joinedAt: rtdbServerTimestamp() };
+
+        if (Object.keys(queue).length >= 8) {
+            const players = Object.values(queue).slice(0, 8);
+            players.forEach((p: any) => delete queue[p.id]);
+
+            (async () => {
+                const teamLobbyId = `team-lobby-${Date.now()}`;
+                const newLobbyRef = ref(rtdb, `customLobbies/${teamLobbyId}`);
+                const playersData = (players as TeamLobbyPlayer[]).sort((a, b) => a.rating - b.rating);
+
+                const newLobby: TeamLobby = {
+                    id: teamLobbyId,
+                    hostId: playersData[0].id,
+                    isPublic: true,
+                    status: 'forming',
+                    teams: {
+                        blue: { '1': playersData[0], '2': playersData[2], '3': playersData[4], '4': playersData[6] },
+                        red: { '1': playersData[1], '2': playersData[3], '3': playersData[5], '4': playersData[7] }
+                    }
+                };
+
+                await set(newLobbyRef, newLobby);
+
+                const playerLobbyUpdates: { [key: string]: string } = {};
+                playersData.forEach(p => { playerLobbyUpdates[`/playerLobbies/${p.id}`] = teamLobbyId; });
+                await update(ref(rtdb), playerLobbyUpdates);
+            })();
+        }
+        playerQueueRef.current = child(teamQueueRef, player.id);
+        return queue;
+    });
+  }, [player]);
   
   const onJoinCustomLobby = async (lobbyCode: string) => {
      if (!player || !rtdb || !lobbyCode) return;
      const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
      const snapshot = await get(lobbyRef);
      if (snapshot.exists()) {
-         setSelectedLobbyName(LOBBIES.find(l=>l.gameMode === '4v4')?.name || 'medium');
-         setCustomLobbyId(lobbyCode);
          setupTeamLobbyListener(lobbyCode);
+         setCustomLobbyId(lobbyCode);
+         setGameState('inCustomLobby');
      } else {
          toast({ title: 'Not Found', description: 'Lobby code is invalid or has expired.', variant: 'destructive'});
      }
@@ -840,6 +775,87 @@ export default function ArenaPage() {
         toast({ title: "Error", description: "Could not join the team.", variant: "destructive"});
       }
   };
+
+ const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
+    if (!player || !rtdb || !IS_FIREBASE_CONFIGURED || !customLobbyId) return;
+
+    try {
+        const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
+        if (!lobby) throw new Error("Lobby configuration not found.");
+
+        await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'starting');
+
+        const [q1, q2, q3, q4] = await Promise.all([
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
+        ]);
+
+        const team1 = Object.values(finalLobbyData.teams.blue).filter((p): p is TeamLobbyPlayer => p !== null);
+        const team2 = Object.values(finalLobbyData.teams.red).filter((p): p is TeamLobbyPlayer => p !== null);
+        const questions = [q1, q2, q3, q4];
+        
+        const teamBattleId = `team-battle-${Date.now()}`;
+        
+        const batch = writeBatch(db);
+        
+        const teamBattleRef = doc(db, "teamBattles", teamBattleId);
+        batch.set(teamBattleRef, {
+            id: teamBattleId,
+            team1: team1.map(p => ({...p, code: '', hasSubmitted: false, language: DEFAULT_LANGUAGE})),
+            team2: team2.map(p => ({...p, code: '', hasSubmitted: false, language: DEFAULT_LANGUAGE})),
+            team1Score: 0,
+            team2Score: 0,
+            status: 'in-progress',
+            difficulty: lobbyName,
+            createdAt: serverTimestamp(),
+            finishedDuels: 0,
+            winnerTeam: null
+        });
+
+        const rtdbUpdates: { [key: string]: any } = {};
+
+        for (let i = 0; i < 4; i++) {
+            const p1 = team1[i];
+            const p2 = team2[i];
+            const question = questions[i];
+            if (!p1 || !p2) continue;
+
+            const isBot1 = p1.id.startsWith('bot_');
+            const isBot2 = p2.id.startsWith('bot_');
+            
+            const battleId = `${teamBattleId}_slot${i+1}`;
+            const battleDocRef = doc(db, 'battles', battleId);
+
+            const newBattle: Battle = {
+                id: battleId,
+                teamBattleId: teamBattleId,
+                player1: { id: p1.id, username: p1.username, avatarUrl: p1.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: isBot1, ...(isBot1 && {code: question.solution}) },
+                player2: { id: p2.id, username: p2.username, avatarUrl: p2.avatarUrl, language: DEFAULT_LANGUAGE, code: getCodePlaceholder(DEFAULT_LANGUAGE, question), hasSubmitted: isBot2, ...(isBot2 && {code: question.solution}) },
+                status: 'in-progress',
+                difficulty: lobbyName,
+                wager: lobby.entryFee,
+                question,
+                createdAt: serverTimestamp(),
+                startedAt: serverTimestamp(),
+            };
+            batch.set(battleDocRef, newBattle);
+            
+            rtdbUpdates[`/playerBattles/${p1.id}`] = battleId;
+            rtdbUpdates[`/playerBattles/${p2.id}`] = battleId;
+        }
+
+        await batch.commit();
+        rtdbUpdates[`/customLobbies/${customLobbyId}`] = null;
+        await update(ref(rtdb), rtdbUpdates);
+
+    } catch (error) {
+        console.error("Error starting team battle:", error);
+        toast({ title: 'Error', description: 'Could not start the team battle.', variant: 'destructive' });
+        if(customLobbyId) await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'waiting');
+    }
+}, [player, toast, customLobbyId]);
 
   const handleToggleLock = async () => {
     if (!customLobbyId || !rtdb || !teamLobbyData || player?.id !== teamLobbyData.hostId) return;
@@ -1042,7 +1058,7 @@ export default function ArenaPage() {
         } else {
             const finalBattleState = { ...battleData, status: 'forfeited' as const, winnerId: 'bot-player' };
             setBattleData(finalBattleState);
-            await processGameEnd(finalBattleState);
+await processGameEnd(finalBattleState);
             setGameState('gameOver');
         }
     }
@@ -1186,11 +1202,11 @@ export default function ArenaPage() {
                 <LobbySelection
                     lobbies={LOBBIES}
                     player={player}
-                    onLobbySelect={onLobbySelect}
+                    onLobbySelect={(lobby) => handleLobbyAction(lobby.name, '1v1', 'find')}
                     isFirebaseConfigured={IS_FIREBASE_CONFIGURED}
-                    onCreateCustomLobby={onCreateCustomLobby}
-                    onJoinCustomLobby={onJoinCustomLobby}
-                    onFindPublicTeamMatch={onFindPublicTeamMatch}
+                    onCreateCustomLobby={(lobbyName) => handleLobbyAction(lobbyName, '4v4', 'create')}
+                    onJoinCustomLobby={(lobbyCode) => handleLobbyAction('medium', '4v4', 'join', lobbyCode)}
+                    onFindPublicTeamMatch={(lobbyName) => handleLobbyAction(lobbyName, '4v4', 'find')}
                 />
             );
         case 'searching':
@@ -1340,3 +1356,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
