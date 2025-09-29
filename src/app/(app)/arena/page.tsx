@@ -27,7 +27,7 @@ import { ref, onValue, remove, set, get, child, goOffline, goOnline, serverTimes
 import { LobbySelection } from './_components/LobbySelection';
 import type { DifficultyLobby, LobbyInfo } from './_components/LobbySelection';
 import { SearchingView } from './_components/SearchingView';
-import { TeamFormationLobby } from './_components/TeamFormationLobby';
+import { CustomLobby } from './_components/CustomLobby';
 import { DuelView } from './_components/DuelView';
 import { TeamBattleView } from './_components/TeamBattleView';
 import { GameOverReport } from './_components/GameOverReport';
@@ -38,7 +38,7 @@ const IS_FIREBASE_CONFIGURED = !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY && !!r
 const DEFAULT_LANGUAGE: SupportedLanguage = "javascript";
 const COMMISSION_RATE = 0.05; // 5% commission
 
-type GameState = 'selectingLobby' | 'searching' | 'formingTeam' | 'inGame' | 'inTeamGame' | 'submittingComparison' | 'gameOver';
+type GameState = 'selectingLobby' | 'searching' | 'inCustomLobby' | 'inGame' | 'inTeamGame' | 'submittingComparison' | 'gameOver';
 
 const LOBBIES: LobbyInfo[] = [
   { name: 'easy', title: 'Easy Breezy', description: 'Perfect for warming up or new duelists.', icon: UsersRound, baseTime: 5, entryFee: 50, gameMode: '1v1' },
@@ -48,9 +48,13 @@ const LOBBIES: LobbyInfo[] = [
 ];
 
 const initialTeamLobbyState: TeamLobby = {
-    blue: { '1': null, '2': null, '3': null, '4': null },
-    red: { '1': null, '2': null, '3': null, '4': null },
+    hostId: '',
+    isPublic: false,
     status: 'waiting',
+    teams: {
+        blue: { '1': null, '2': null, '3': null, '4': null },
+        red: { '1': null, '2': null, '3': null, '4': null },
+    }
 };
 
 
@@ -67,6 +71,7 @@ export default function ArenaPage() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   
   const [battleId, setBattleId] = useState<string | null>(null);
+  const [customLobbyId, setCustomLobbyId] = useState<string | null>(null);
   const [battleData, setBattleData] = useState<Battle | null>(null);
   const [teamLobbyData, setTeamLobbyData] = useState<TeamLobby | null>(null);
   const [teamBattleData, setTeamBattleData] = useState<TeamBattle | null>(null);
@@ -75,8 +80,8 @@ export default function ArenaPage() {
   const battleListenerUnsubscribe = useRef<() => void | undefined>();
   const playerQueueRef = useRef<any>();
   const playerBattleListenerUnsubscribe = useRef<() => void | undefined>();
-  const teamLobbyRef = useRef<any>();
-  const teamLobbyListenerUnsubscribe = useRef<() => void | undefined>();
+  const customLobbyRef = useRef<any>();
+  const customLobbyListenerUnsubscribe = useRef<() => void | undefined>();
 
 
   const cleanupListeners = useCallback(() => {
@@ -88,11 +93,11 @@ export default function ArenaPage() {
         remove(playerQueueRef.current);
         playerQueueRef.current = null;
     }
-     if (teamLobbyListenerUnsubscribe.current) {
-        teamLobbyListenerUnsubscribe.current();
-        teamLobbyListenerUnsubscribe.current = undefined;
-        if(teamLobbyRef.current) remove(teamLobbyRef.current);
-        teamLobbyRef.current = null;
+     if (customLobbyListenerUnsubscribe.current) {
+        customLobbyListenerUnsubscribe.current();
+        customLobbyListenerUnsubscribe.current = undefined;
+        if(customLobbyRef.current) remove(customLobbyRef.current);
+        customLobbyRef.current = null;
     }
     if (playerBattleListenerUnsubscribe.current) {
         playerBattleListenerUnsubscribe.current();
@@ -115,6 +120,7 @@ export default function ArenaPage() {
     setTimeRemaining(0);
     setShowLeaveConfirm(false);
     setBattleId(null);
+    setCustomLobbyId(null);
     setBattleData(null);
     setTeamLobbyData(null);
     setTeamBattleData(null);
@@ -281,14 +287,6 @@ export default function ArenaPage() {
                 else if (team2Wins > team1Wins) winnerTeam = 'team2';
                 
                 transaction.update(teamBattleRef, { status: 'completed', winnerTeam });
-
-                // Now that we have a winner, process the end for all 8 players in the transaction
-                for (const b of allTeamBattles) {
-                    const battlePlayerId = b.player1.id === player.id ? b.player1.id : b.player2!.id;
-                    const currentPlayerTeam = team1Ids.includes(battlePlayerId) ? 'team1' : 'team2';
-                    const currentOutcome = winnerTeam === 'draw' ? 'draw' : (winnerTeam === currentPlayerTeam ? 'win' : 'loss');
-                    // This logic is tricky to run inside a transaction, better to do it outside
-                }
 
                 // Since we can't call processGameEnd (which does writes) inside a transaction,
                 // we'll rely on the listener of each client to pick up the 'completed' status
@@ -515,8 +513,8 @@ export default function ArenaPage() {
         if (!lobby) throw new Error("Lobby configuration not found.");
 
         const teamBattleId = `team-battle-${Date.now()}`;
-        const team1 = Object.values(finalLobbyData.blue || {}).filter((p): p is TeamLobbyPlayer => p !== null);
-        const team2 = Object.values(finalLobbyData.red || {}).filter((p): p is TeamLobbyPlayer => p !== null);
+        const team1 = Object.values(finalLobbyData.teams.blue).filter((p): p is TeamLobbyPlayer => p !== null);
+        const team2 = Object.values(finalLobbyData.teams.red).filter((p): p is TeamLobbyPlayer => p !== null);
         
         await setDoc(doc(db, 'teamBattles', teamBattleId), {
             id: teamBattleId,
@@ -591,181 +589,19 @@ export default function ArenaPage() {
         });
         await Promise.all(notificationPromises);
         
-        await remove(ref(rtdb, `teamMatchmakingQueue/${lobbyName}`));
+        await remove(ref(rtdb, `customLobbies/${customLobbyId}`));
 
     } catch (error) {
         console.error("Error starting team battle:", error);
         toast({ title: 'Error', description: 'Could not start the team battle.', variant: 'destructive' });
     }
-}, [player, toast]);
+}, [player, toast, customLobbyId]);
 
-
-  const setupTeamLobbyListener = useCallback(async (lobbyName: DifficultyLobby) => {
-    if (!rtdb || !player) return;
-    goOnline(rtdb);
-    
-    teamLobbyRef.current = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
-    
-    playerBattleListenerUnsubscribe.current = onValue(ref(rtdb, `playerBattles/${player.id}`), (snapshot) => {
-        const newBattleId = snapshot.val();
-        if (newBattleId) {
-            setBattleId(newBattleId);
-            remove(ref(rtdb, `playerBattles/${player.id}`));
-        }
-    });
-
-    const snapshot = await get(teamLobbyRef.current);
-    if (!snapshot.exists()) {
-        await set(teamLobbyRef.current, initialTeamLobbyState);
-    }
-    
-    teamLobbyListenerUnsubscribe.current = onValue(teamLobbyRef.current, (snapshot) => {
-        const data: TeamLobby | null = snapshot.val();
-        if(data){
-            setTeamLobbyData(data);
-            
-            if (data.status === 'starting') return;
-            
-            const blueTeam = Object.values(data.blue || {}).filter(p => p !== null);
-            const redTeam = Object.values(data.red || {}).filter(p => p !== null);
-            const isLobbyFull = blueTeam.length === 4 && redTeam.length === 4;
-            
-            const anyPlayerIsMe = [...blueTeam, ...redTeam].some(p => p?.id === player.id);
-
-            if (isLobbyFull && anyPlayerIsMe && data.status === 'waiting') {
-                const lobbyStatusRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}/status`);
-                rtdbRunTransaction(lobbyStatusRef, (currentStatus) => {
-                    if (currentStatus === 'waiting') {
-                        return 'starting';
-                    }
-                    return; // Abort transaction if status is not 'waiting'
-                }).then(({ committed }) => {
-                    if (committed) {
-                        startTeamBattle(lobbyName, data);
-                    }
-                });
-            }
-        } else {
-             setTeamLobbyData(initialTeamLobbyState);
-        }
-    });
-  }, [player, startTeamBattle]);
-
-
-  const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4') => {
-      if (!player || !rtdb || !selectedLobbyName) return;
-
-      const teamSlotRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/${team}/${slot}`);
-
-      try {
-        await rtdbRunTransaction(teamSlotRef, (currentData) => {
-            if (currentData === null) {
-                return { 
-                    id: player.id,
-                    username: player.username,
-                    avatarUrl: player.avatarUrl || '',
-                    rating: player.rating
-                };
-            } else {
-                return; 
-            }
-        });
-      } catch (error) {
-        toast({ title: 'Error Joining Team', description: 'Could not join the team slot. It might have just been taken.', variant: 'destructive'});
-        console.error("Error setting team slot:", error);
-      }
+  const onLobbySelect = (lobby: LobbyInfo) => {
+    // This function will be updated for custom lobbies.
+    // For now, it just handles 1v1
   };
 
-    const handleFillWithBots = async () => {
-    if (!rtdb || !selectedLobbyName || !teamLobbyData) return;
-
-    const newLobbyData = JSON.parse(JSON.stringify(teamLobbyData));
-    
-    if (!newLobbyData.blue) newLobbyData.blue = {};
-    if (!newLobbyData.red) newLobbyData.red = {};
-
-    const botNames = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel"];
-    let botIndex = 0;
-
-    const teams: ('blue' | 'red')[] = ['blue', 'red'];
-    const slots: ('1' | '2' | '3' | '4')[] = ['1', '2', '3', '4'];
-    
-    for (const team of teams) {
-        for (const slot of slots) {
-            if (!newLobbyData[team][slot]) {
-                if (botIndex >= botNames.length) break;
-                
-                const botName = `Bot ${botNames[botIndex]}`;
-                newLobbyData[team][slot] = {
-                    id: `bot_${botNames[botIndex].toLowerCase()}_${Date.now()}`,
-                    username: botName,
-                    avatarUrl: `https://placehold.co/100x100.png?text=${botNames[botIndex][0]}`,
-                    rating: 1000 + Math.floor(Math.random() * 500)
-                };
-                botIndex++;
-            }
-        }
-    }
-
-    try {
-      await set(ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}`), newLobbyData);
-      toast({ title: "Bots Deployed!", description: "Lobby filled with bots. Match should start shortly." });
-    } catch (error) {
-      console.error("Error filling lobby with bots:", error);
-      toast({ title: "Error", description: "Could not add bots to the lobby.", variant: "destructive" });
-    }
-  };
-  
-
-  const handleSelectLobby = async (lobbyInfo: LobbyInfo) => {
-    if (!player) return;
-
-    if (player.coins < lobbyInfo.entryFee) {
-        toast({ title: "Insufficient Coins", description: `You need ${lobbyInfo.entryFee} coins to enter.`, variant: "destructive", action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction> });
-        return;
-    }
-    
-    if (IS_FIREBASE_CONFIGURED) {
-         try {
-            const playerRef = doc(db, "players", player.id);
-            await runTransaction(db, async (transaction) => {
-              const playerDoc = await transaction.get(playerRef);
-              if (!playerDoc.exists() || (playerDoc.data().coins || 0) < lobbyInfo.entryFee) {
-                throw new Error("Insufficient coins.");
-              }
-              const newCoins = (playerDoc.data().coins || 0) - lobbyInfo.entryFee;
-              transaction.update(playerRef, { coins: newCoins });
-            });
-            toast({ title: "Joining Lobby...", description: `${lobbyInfo.entryFee} coins deducted for entry. Good luck!`, className: "bg-primary text-primary-foreground" });
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-            toast({ title: "Error Entering Lobby", description: `Failed to deduct coins: ${errorMessage}`, variant: "destructive" });
-            return;
-        }
-    }
-
-
-    if (lobbyInfo.gameMode === '4v4') {
-        setSelectedLobbyName(lobbyInfo.name);
-        setGameState('formingTeam');
-        if(IS_FIREBASE_CONFIGURED) {
-            await setupTeamLobbyListener(lobbyInfo.name);
-        } else {
-            setTeamLobbyData(initialTeamLobbyState);
-        }
-        return;
-    }
-
-    setGameState('searching');
-    setSelectedLobbyName(lobbyInfo.name);
-
-    if (IS_FIREBASE_CONFIGURED) {
-      await findMatch(lobbyInfo);
-    } else {
-        startBotMatch(lobbyInfo);
-    }
-  };
-  
   useEffect(() => {
     if (!battleId || !player || !IS_FIREBASE_CONFIGURED) return;
 
@@ -786,17 +622,17 @@ export default function ArenaPage() {
       const newBattleData = { id: docSnap.id, ...docSnap.data() } as Battle;
       setBattleData(newBattleData);
       
-      const wasSearchingOrForming = gameState === 'searching' || gameState === 'formingTeam';
+      const wasSearchingOrInLobby = gameState === 'searching' || gameState === 'inCustomLobby';
 
       if (newBattleData.status === 'in-progress') {
         setGameState(currentState => {
-            if (wasSearchingOrForming) {
-                const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty);
+            if (wasSearchingOrInLobby) {
+                const lobby = LOBBIES.find(l => l.name === newBattleData.difficulty && l.gameMode === (newBattleData.teamBattleId ? '4v4' : '1v1'));
                 if (lobby) setTimeRemaining(lobby.baseTime * 60);
                 setTimeout(() => {
-                  toast({ title: "Opponent Found!", description: "Your duel is starting now!", className: "bg-green-500 text-white" });
+                  toast({ title: "Match Starting!", description: "Your duel is starting now!", className: "bg-green-500 text-white" });
                 }, 0);
-                return 'inGame';
+                return newBattleData.teamBattleId ? 'inTeamGame' : 'inGame';
             }
             return currentState;
         });
@@ -909,26 +745,6 @@ export default function ArenaPage() {
     }
   };
 
-  const handleLeaveLobby = async () => {
-    if (!player || !rtdb || !selectedLobbyName || !teamLobbyData) return;
-    
-    let playerFoundAndRemoved = false;
-    for (const team of ['blue', 'red'] as const) {
-        for (const slot of ['1', '2', '3', '4'] as const) {
-            if (teamLobbyData[team]?.[slot]?.id === player.id) {
-                const teamSlotRef = ref(rtdb, `teamMatchmakingQueue/${selectedLobbyName}/${team}/${slot}`);
-                await set(teamSlotRef, null);
-                playerFoundAndRemoved = true;
-                break;
-            }
-        }
-        if (playerFoundAndRemoved) break;
-    }
-    
-    resetGameState(true);
-    toast({ title: 'Left Lobby', description: 'You have left the team formation lobby.'});
-  };
-
 
   const handleLeaveConfirm = async () => {
     if (!player) return;
@@ -936,7 +752,6 @@ export default function ArenaPage() {
 
     const currentGameState = gameState; 
     
-    // Unified coin refund logic
     const refundCoins = async () => {
         if (IS_FIREBASE_CONFIGURED && selectedLobbyName) {
             try {
@@ -965,7 +780,6 @@ export default function ArenaPage() {
         resetGameState(true);
     } 
     else if (currentGameState === 'inGame' && battleData) {
-        // No refund on forfeit
         if (IS_FIREBASE_CONFIGURED) {
             const opponent = battleData.player1.id === player.id ? battleData.player2 : battleData.player1;
             if (opponent) {
@@ -982,13 +796,11 @@ export default function ArenaPage() {
             await processGameEnd(finalBattleState);
             setGameState('gameOver');
         }
-    } else if (currentGameState === 'formingTeam') {
-        await handleLeaveLobby(); // This handles DB cleanup for team lobby
+    } else if (currentGameState === 'inCustomLobby') {
+        // Leaving a custom lobby - will be implemented
         await refundCoins();
-        resetGameState(true); // Resets all states
+        resetGameState(true);
     } else if (currentGameState === 'inTeamGame') {
-        // Forfeiting a team game is complex. For now, just leave.
-        // No refund.
         toast({ title: "Match Left", description: "You have left the team battle." });
         resetGameState(true);
     }
@@ -1069,7 +881,7 @@ export default function ArenaPage() {
                 <LobbySelection
                     lobbies={LOBBIES}
                     player={player}
-                    onSelectLobby={handleSelectLobby}
+                    onLobbySelect={onLobbySelect}
                     isFirebaseConfigured={IS_FIREBASE_CONFIGURED}
                 />
             );
@@ -1080,17 +892,20 @@ export default function ArenaPage() {
                     onCancelSearch={() => setShowLeaveConfirm(true)}
                 />
             );
-        case 'formingTeam':
-             if (!teamLobbyData) {
-                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading Team Lobby...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
+        case 'inCustomLobby':
+             if (!teamLobbyData || !customLobbyId) {
+                return <div className="flex flex-col items-center justify-center h-full p-4"><p className="mb-4">Loading Custom Lobby...</p><Loader2 className="h-8 w-8 animate-spin"/></div>;
              }
             return (
-                <TeamFormationLobby 
+                <CustomLobby 
                     player={player}
                     lobbyData={teamLobbyData}
-                    onJoinTeam={handleJoinTeam}
+                    lobbyCode={customLobbyId}
+                    onJoinTeam={() => {}}
                     onLeave={() => setShowLeaveConfirm(true)}
-                    onFillWithBots={handleFillWithBots}
+                    onStartGame={() => {}}
+                    onToggleLock={() => {}}
+                    onFillWithBots={() => {}}
                 />
             );
         case 'inGame':
@@ -1157,7 +972,7 @@ export default function ArenaPage() {
           </div>
         </div>
       )}
-      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={gameState === 'searching' ? 'search' : (gameState === 'formingTeam' ? 'lobby' : (gameState === 'inGame' || gameState === 'inTeamGame' ? 'game' : null))}/>
+      <ArenaLeaveConfirmationDialog open={showLeaveConfirm} onOpenChange={setShowLeaveConfirm} onConfirm={handleLeaveConfirm} type={gameState === 'searching' ? 'search' : (gameState === 'inCustomLobby' ? 'lobby' : (gameState === 'inGame' || gameState === 'inTeamGame' ? 'game' : null))}/>
     </>
   );
 }

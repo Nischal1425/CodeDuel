@@ -1,13 +1,15 @@
 
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Swords, Coins as CoinsIcon, AlertTriangle, Users } from 'lucide-react';
+import { Swords, Coins as CoinsIcon, AlertTriangle, Users, PlusCircle, Gamepad, KeyRound } from 'lucide-react';
 import type { Player, GameMode } from '@/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 
 export type DifficultyLobby = 'easy' | 'medium' | 'hard';
 
@@ -24,8 +26,12 @@ export interface LobbyInfo {
 interface LobbySelectionProps {
   lobbies: LobbyInfo[];
   player: Player | null;
-  onSelectLobby: (lobby: LobbyInfo) => void;
+  onLobbySelect: (lobby: LobbyInfo) => void;
   isFirebaseConfigured: boolean;
+  // New props for custom 4v4 lobbies
+  onCreateCustomLobby: (lobbyName: DifficultyLobby) => void;
+  onJoinCustomLobby: (lobbyCode: string) => void;
+  onFindPublicTeamMatch: (lobbyName: DifficultyLobby) => void;
 }
 
 function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSelectLobby: (lobby: LobbyInfo) => void; disabled?: boolean; }) {
@@ -45,16 +51,65 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
             onClick={() => onSelectLobby(lobby)}
             disabled={disabled}
         >
-          {disabled ? "Unable to Join" : `Join ${lobby.gameMode === '1v1' ? (lobby.name.charAt(0).toUpperCase() + lobby.name.slice(1)) : ''} Lobby`}
+          Join Duel
         </Button>
       </CardFooter>
     </Card>
   );
 }
 
-export function LobbySelection({ lobbies, player, onSelectLobby, isFirebaseConfigured }: LobbySelectionProps) {
+function TeamLobbyCard({ lobby, onCreate, onFind, onJoin, disabled }: { lobby: LobbyInfo; onCreate: () => void; onFind: () => void; onJoin: (code: string) => void; disabled?: boolean; }) {
+    const [joinCode, setJoinCode] = useState('');
+    
+    return (
+        <Card className={cn("flex flex-col transition-shadow hover:shadow-lg col-span-1 md:col-span-3", disabled ? "opacity-70" : "")}>
+            <CardHeader className="items-center text-center">
+                <lobby.icon className="h-12 w-12 text-primary mb-3" />
+                <CardTitle className="text-2xl">{lobby.title}</CardTitle>
+                <CardDescription>{lobby.description}</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-2 text-sm text-muted-foreground flex-grow">
+                <p className="font-semibold text-primary">Entry Fee: {lobby.entryFee} <CoinsIcon className="inline h-4 w-4 text-yellow-500" /></p>
+            </CardContent>
+            <CardFooter className="flex-col md:flex-row gap-4 p-4">
+                 <div className="w-full flex-1 flex flex-col gap-2">
+                    <Button className="w-full" onClick={onFind} disabled={disabled}>
+                        <Gamepad className="mr-2"/> Find Public Match
+                    </Button>
+                    <Button className="w-full" variant="secondary" onClick={onCreate} disabled={disabled}>
+                       <PlusCircle className="mr-2"/> Create Custom Game
+                    </Button>
+                </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <Separator orientation="vertical" className="h-10 hidden md:block"/>
+                    <Separator orientation="horizontal" className="w-full md:hidden"/>
+                </div>
+                <div className="w-full flex-1 flex flex-col gap-2 items-center">
+                    <div className="flex w-full max-w-sm items-center space-x-2">
+                        <Input 
+                            type="text" 
+                            placeholder="Lobby Code" 
+                            value={joinCode}
+                            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                            className="bg-background"
+                            disabled={disabled}
+                        />
+                        <Button variant="outline" onClick={() => onJoin(joinCode)} disabled={disabled || !joinCode}>
+                            <KeyRound className="mr-2"/> Join
+                        </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Join a friend's lobby with a code.</p>
+                </div>
+            </CardFooter>
+        </Card>
+    );
+}
+
+export function LobbySelection({ lobbies, player, onLobbySelect, isFirebaseConfigured, onCreateCustomLobby, onJoinCustomLobby, onFindPublicTeamMatch }: LobbySelectionProps) {
     const duelLobbies = lobbies.filter(l => l.gameMode === '1v1');
-    const teamLobbies = lobbies.filter(l => l.gameMode === '4v4');
+    const teamLobby = lobbies.find(l => l.gameMode === '4v4');
+
+    const notEnoughCoins = (fee: number) => !player || player.coins < fee;
 
     return (
         <div className="container mx-auto py-8 h-full flex flex-col justify-center">
@@ -72,25 +127,27 @@ export function LobbySelection({ lobbies, player, onSelectLobby, isFirebaseConfi
                                 <LobbyCard 
                                     key={lobby.name} 
                                     lobby={lobby} 
-                                    onSelectLobby={onSelectLobby} 
-                                    disabled={!player || player.coins < lobby.entryFee}
+                                    onSelectLobby={onLobbySelect} 
+                                    disabled={notEnoughCoins(lobby.entryFee)}
                                 />
                             ))}
                         </div>
                     </div>
-                     <div>
-                        <h3 className="text-xl font-semibold text-center mb-4 border-b pb-2">4v4 Team DeathMatch</h3>
-                         <div className="grid md:grid-cols-3 gap-6">
-                            {teamLobbies.map(lobby => (
-                                <LobbyCard 
-                                    key={lobby.name} 
-                                    lobby={lobby} 
-                                    onSelectLobby={onSelectLobby} 
-                                    disabled={!player || player.coins < lobby.entryFee}
-                                />
-                            ))}
+                     {teamLobby && (
+                         <div>
+                            <h3 className="text-xl font-semibold text-center mb-4 border-b pb-2">4v4 Team DeathMatch</h3>
+                            <div className="grid md:grid-cols-3 gap-6">
+                               <TeamLobbyCard
+                                 key={teamLobby.name}
+                                 lobby={teamLobby}
+                                 onCreate={() => onCreateCustomLobby(teamLobby.name)}
+                                 onFind={() => onFindPublicTeamMatch(teamLobby.name)}
+                                 onJoin={onJoinCustomLobby}
+                                 disabled={notEnoughCoins(teamLobby.entryFee)}
+                               />
+                            </div>
                         </div>
-                    </div>
+                     )}
                 </CardContent>
             </Card>
             {!isFirebaseConfigured && (
