@@ -476,70 +476,54 @@ export default function ArenaPage() {
     });
   }, [player, toast, resetGameState]);
 
-  const handleLobbyAction = async (lobbyName: DifficultyLobby, gameMode: GameMode, action: 'find' | 'create' | 'join', joinCode?: string) => {
+  const handleLobby1v1Action = (lobby: LobbyInfo) => {
     if (!player) {
-        toast({ title: "Not Logged In", description: "You must be logged in to play.", variant: "destructive" });
-        return;
+      toast({ title: "Not Logged In", description: "You must be logged in to play.", variant: "destructive" });
+      return;
     }
-    const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === gameMode);
-    if (!lobby) {
-        toast({ title: "Error", description: "Invalid lobby selected.", variant: "destructive" });
-        return;
-    }
-
     if (player.coins < lobby.entryFee) {
-        toast({
-            title: "Insufficient Coins",
-            description: "You don't have enough coins to enter this lobby.",
-            variant: "destructive",
-            action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction>,
-        });
-        return;
+      toast({
+        title: "Insufficient Coins",
+        description: `You need ${lobby.entryFee} coins to enter the ${lobby.title} lobby.`,
+        variant: "destructive",
+        action: <ToastAction altText="Buy Coins" onClick={() => router.push('/buy-coins')}>Buy Coins</ToastAction>,
+      });
+      return;
     }
-    
-    try {
+
+    const startAction = async () => {
+      try {
         if (IS_FIREBASE_CONFIGURED) {
-            const playerRef = doc(db, "players", player.id);
-            await runTransaction(db, async (transaction) => {
-                const playerSnap = await transaction.get(playerRef);
-                if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) {
-                    throw new Error("Insufficient coins.");
-                }
-                const newCoins = playerSnap.data().coins - lobby.entryFee;
-                transaction.update(playerRef, { coins: newCoins });
-            });
+          const playerRef = doc(db, "players", player.id);
+          await runTransaction(db, async (transaction) => {
+            const playerSnap = await transaction.get(playerRef);
+            if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) {
+              throw new Error("Insufficient coins.");
+            }
+            const newCoins = playerSnap.data().coins - lobby.entryFee;
+            transaction.update(playerRef, { coins: newCoins });
+          });
         }
-
+        
         setSelectedLobbyName(lobby.name);
+        setGameState('searching');
 
-        if (gameMode === '1v1') {
-            setGameState('searching');
-            if (IS_FIREBASE_CONFIGURED) {
-                await findMatch(lobby);
-            } else {
-                startBotMatch(lobby);
-            }
-        } else { // 4v4
-            if (action === 'create') {
-                await onCreateCustomLobby(lobby.name);
-            } else if (action === 'find') {
-                await onFindPublicTeamMatch(lobby.name);
-            } else if (action === 'join' && joinCode) {
-                await onJoinCustomLobby(joinCode);
-            }
+        if (IS_FIREBASE_CONFIGURED) {
+          await findMatch(lobby);
+        } else {
+          startBotMatch(lobby);
         }
-    } catch (error) {
-        console.error("Lobby action failed: ", error);
+      } catch (error) {
+        console.error("1v1 lobby action failed: ", error);
         toast({
-            title: "Lobby Action Failed",
-            description: (error as Error).message === "Insufficient coins."
-                ? "You don't have enough coins."
-                : "Could not perform lobby action.",
-            variant: "destructive",
+          title: "Lobby Entry Failed",
+          description: (error as Error).message === "Insufficient coins." ? "You don't have enough coins." : "Could not enter lobby.",
+          variant: "destructive",
         });
-    }
+      }
+    };
+    startAction();
   };
-
 
   const startBotMatch = useCallback(async (lobby: LobbyInfo) => {
       if (!player) return;
@@ -594,187 +578,6 @@ export default function ArenaPage() {
       }
   }, [player, toast, resetGameState]);
 
-
-  const setupTeamLobbyListener = useCallback((lobbyId: string, isPublicMatch: boolean = false) => {
-    if (!rtdb || !player) return;
-    const lobbyRef = ref(rtdb, `customLobbies/${lobbyId}`);
-    
-    customLobbyListenerUnsubscribe.current = onValue(lobbyRef, (snapshot) => {
-        if (!snapshot.exists()) {
-             if (gameState !== 'selectingLobby' && gameState !== 'inGame' && gameState !== 'inTeamGame') {
-                 toast({ title: "Lobby Closed", description: "The host has closed the lobby or the game has started." });
-                 resetGameState(true);
-             }
-             return;
-        }
-        const data = snapshot.val() as TeamLobby;
-        setTeamLobbyData(data);
-        
-        if (isPublicMatch) {
-            setGameState('inTeamFormation');
-        } else {
-            setGameState('inCustomLobby');
-        }
-
-        if (!data.teams || !data.teams.blue || !data.teams.red) {
-            return; 
-        }
-
-        const allPlayers = [...Object.values(data.teams.blue), ...Object.values(data.teams.red)].filter(p => p !== null);
-        if (data.status === 'forming' && allPlayers.length === 8) {
-            if (data.hostId === player.id) { // Only host starts the battle
-                startTeamBattle(selectedLobbyName || 'medium', data);
-            }
-        }
-
-        if (data.status === 'starting') {
-            const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
-            playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (battleSnap) => {
-                const newBattleId = battleSnap.val();
-                if (newBattleId) {
-                    setBattleId(newBattleId);
-                    remove(playerBattleRef);
-                }
-            });
-        }
-    });
-
-  }, [resetGameState, toast, player, gameState, selectedLobbyName, startTeamBattle]);
-
-  const onCreateCustomLobby = async (lobbyName: DifficultyLobby) => {
-    if (!player || !rtdb) return;
-    
-    const lobbyCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-    const newLobby: TeamLobby = {
-        id: lobbyCode,
-        ...initialTeamLobbyState,
-        hostId: player.id
-    };
-    
-    const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
-    await set(lobbyRef, newLobby);
-    
-    setCustomLobbyId(lobbyCode);
-    setupTeamLobbyListener(lobbyCode);
-    setGameState('inCustomLobby');
-  };
-
-   const onFindPublicTeamMatch = useCallback(async (lobbyName: DifficultyLobby) => {
-    if (!player || !rtdb) return;
-    goOnline(rtdb);
-    setGameState('searching');
-
-    const teamQueueRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
-    
-    // Check for open public lobbies first
-    const publicLobbiesRef = query(collection(db, 'customLobbies'), where('isPublic', '==', true), where('status', '==', 'waiting'));
-    const publicLobbiesSnap = await getDocs(publicLobbiesRef as any);
-
-    for (const lobbyDoc of publicLobbiesSnap.docs) {
-        const lobbyData = lobbyDoc.data() as TeamLobby;
-        const allPlayers = [...Object.values(lobbyData.teams.blue || {}), ...Object.values(lobbyData.teams.red || {})].filter(p => p);
-        if (allPlayers.length < 8) {
-            // Found a lobby with space, try to join it
-            for (const team of ['blue', 'red'] as const) {
-                for (const slot of ['1', '2', '3', '4'] as const) {
-                    if (!lobbyData.teams[team][slot]) {
-                        await handleJoinTeam(team, slot, lobbyDoc.id);
-                        return; // Exit after joining
-                    }
-                }
-            }
-        }
-    }
-
-
-    // No open public lobby, join the matchmaking queue
-    const playerLobbyRef = ref(rtdb, `playerLobbies/${player.id}`);
-    const unsubscribePlayerLobby = onValue(playerLobbyRef, (snapshot) => {
-        const lobbyId = snapshot.val();
-        if (lobbyId) {
-            unsubscribePlayerLobby();
-            remove(playerLobbyRef);
-            setCustomLobbyId(lobbyId);
-            setupTeamLobbyListener(lobbyId, true);
-        }
-    });
-
-    rtdbRunTransaction(teamQueueRef, (queue) => {
-        if (queue === null) queue = {};
-        
-        queue[player.id] = { id: player.id, username: player.username, avatarUrl: player.avatarUrl, rating: player.rating, joinedAt: rtdbServerTimestamp() };
-
-        if (Object.keys(queue).length >= 8) {
-            const players = Object.values(queue).slice(0, 8);
-            players.forEach((p: any) => delete queue[p.id]);
-
-            (async () => {
-                const teamLobbyId = `team-lobby-${Date.now()}`;
-                const newLobbyRef = ref(rtdb, `customLobbies/${teamLobbyId}`);
-                const playersData = (players as TeamLobbyPlayer[]).sort((a, b) => a.rating - b.rating);
-
-                const newLobby: TeamLobby = {
-                    id: teamLobbyId,
-                    hostId: playersData[0].id,
-                    isPublic: true,
-                    status: 'forming',
-                    teams: {
-                        blue: { '1': playersData[0], '2': playersData[2], '3': playersData[4], '4': playersData[6] },
-                        red: { '1': playersData[1], '2': playersData[3], '3': playersData[5], '4': playersData[7] }
-                    }
-                };
-
-                await set(newLobbyRef, newLobby);
-
-                const playerLobbyUpdates: { [key: string]: string } = {};
-                playersData.forEach(p => { playerLobbyUpdates[`/playerLobbies/${p.id}`] = teamLobbyId; });
-                await update(ref(rtdb), playerLobbyUpdates);
-            })();
-        }
-        playerQueueRef.current = child(teamQueueRef, player.id);
-        return queue;
-    });
-  }, [player]);
-  
-  const onJoinCustomLobby = async (lobbyCode: string) => {
-     if (!player || !rtdb || !lobbyCode) return;
-     const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
-     const snapshot = await get(lobbyRef);
-     if (snapshot.exists()) {
-         setupTeamLobbyListener(lobbyCode);
-         setCustomLobbyId(lobbyCode);
-         setGameState('inCustomLobby');
-     } else {
-         toast({ title: 'Not Found', description: 'Lobby code is invalid or has expired.', variant: 'destructive'});
-     }
-  };
-  
-  const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4', lobbyId?: string) => {
-      if (!player || !rtdb) return;
-      const id = lobbyId || customLobbyId;
-      if (!id) {
-        toast({ title: "Error", description: "Lobby ID not found.", variant: "destructive"});
-        return;
-      }
-      
-      const slotRef = ref(rtdb, `customLobbies/${id}/teams/${team}/${slot}`);
-      
-      const newPlayerInSlot: TeamLobbyPlayer = {
-          id: player.id,
-          username: player.username,
-          rating: player.rating,
-          avatarUrl: player.avatarUrl,
-      };
-
-      try {
-        await set(slotRef, newPlayerInSlot);
-        setCustomLobbyId(id);
-        setupTeamLobbyListener(id);
-      } catch (error) {
-        console.error("Failed to join team slot", error);
-        toast({ title: "Error", description: "Could not join the team.", variant: "destructive"});
-      }
-  };
 
  const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
     if (!player || !rtdb || !IS_FIREBASE_CONFIGURED || !customLobbyId) return;
@@ -856,6 +659,249 @@ export default function ArenaPage() {
         if(customLobbyId) await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'waiting');
     }
 }, [player, toast, customLobbyId]);
+
+  const setupTeamLobbyListener = useCallback((lobbyId: string, isPublicMatch: boolean = false) => {
+    if (!rtdb || !player) return;
+    const lobbyRef = ref(rtdb, `customLobbies/${lobbyId}`);
+    
+    customLobbyListenerUnsubscribe.current = onValue(lobbyRef, (snapshot) => {
+        if (!snapshot.exists()) {
+             if (gameState !== 'selectingLobby' && gameState !== 'inGame' && gameState !== 'inTeamGame') {
+                 toast({ title: "Lobby Closed", description: "The host has closed the lobby or the game has started." });
+                 resetGameState(true);
+             }
+             return;
+        }
+        const data = snapshot.val() as TeamLobby;
+        setTeamLobbyData(data);
+        
+        if (isPublicMatch) {
+            setGameState('inTeamFormation');
+        } else {
+            setGameState('inCustomLobby');
+        }
+
+        if (!data.teams || !data.teams.blue || !data.teams.red) {
+            return; 
+        }
+
+        const allPlayers = [...Object.values(data.teams.blue), ...Object.values(data.teams.red)].filter(p => p !== null);
+        if (data.status === 'forming' && allPlayers.length === 8) {
+            if (data.hostId === player.id) { // Only host starts the battle
+                startTeamBattle(selectedLobbyName || 'medium', data);
+            }
+        }
+
+        if (data.status === 'starting') {
+            const playerBattleRef = ref(rtdb, `playerBattles/${player.id}`);
+            playerBattleListenerUnsubscribe.current = onValue(playerBattleRef, (battleSnap) => {
+                const newBattleId = battleSnap.val();
+                if (newBattleId) {
+                    setBattleId(newBattleId);
+                    remove(playerBattleRef);
+                }
+            });
+        }
+    });
+
+  }, [resetGameState, toast, player, gameState, selectedLobbyName, startTeamBattle]);
+
+  const handleCreateCustomLobby = async (lobbyName: DifficultyLobby) => {
+    if (!player || !rtdb) return;
+
+    const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
+    if (!lobby) return;
+    if (player.coins < lobby.entryFee) {
+        toast({ title: "Insufficient Coins", description: "You don't have enough coins for this.", variant: "destructive" });
+        return;
+    }
+
+    try {
+        if (IS_FIREBASE_CONFIGURED) {
+            const playerRef = doc(db, "players", player.id);
+            await runTransaction(db, async (transaction) => {
+                const playerSnap = await transaction.get(playerRef);
+                if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) throw new Error("Insufficient coins.");
+                transaction.update(playerRef, { coins: playerSnap.data().coins - lobby.entryFee });
+            });
+        }
+        
+        const lobbyCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const newLobby: TeamLobby = {
+            id: lobbyCode,
+            ...initialTeamLobbyState,
+            hostId: player.id
+        };
+        
+        const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
+        await set(lobbyRef, newLobby);
+        
+        setCustomLobbyId(lobbyCode);
+        setSelectedLobbyName(lobbyName);
+        setupTeamLobbyListener(lobbyCode);
+        setGameState('inCustomLobby');
+
+    } catch (e) {
+        toast({ title: "Error", description: "Could not create lobby.", variant: "destructive"});
+    }
+  };
+
+   const handleFindPublicTeamMatch = useCallback(async (lobbyName: DifficultyLobby) => {
+    if (!player || !rtdb) return;
+
+    const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
+    if (!lobby) return;
+    if (player.coins < lobby.entryFee) {
+        toast({ title: "Insufficient Coins", description: "You don't have enough coins.", variant: "destructive" });
+        return;
+    }
+    
+    try {
+        if (IS_FIREBASE_CONFIGURED) {
+            const playerRef = doc(db, "players", player.id);
+            await runTransaction(db, async (transaction) => {
+                const playerSnap = await transaction.get(playerRef);
+                if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) throw new Error("Insufficient coins.");
+                transaction.update(playerRef, { coins: playerSnap.data().coins - lobby.entryFee });
+            });
+        }
+
+        goOnline(rtdb);
+        setSelectedLobbyName(lobbyName);
+        setGameState('searching');
+
+        const teamQueueRef = ref(rtdb, `teamMatchmakingQueue/${lobbyName}`);
+        
+        const publicLobbiesRef = query(collection(db, 'customLobbies'), where('isPublic', '==', true), where('status', '==', 'waiting'));
+        const publicLobbiesSnap = await getDocs(publicLobbiesRef as any);
+
+        for (const lobbyDoc of publicLobbiesSnap.docs) {
+            const lobbyData = lobbyDoc.data() as TeamLobby;
+            const allPlayers = [...Object.values(lobbyData.teams.blue || {}), ...Object.values(lobbyData.teams.red || {})].filter(p => p);
+            if (allPlayers.length < 8) {
+                for (const team of ['blue', 'red'] as const) {
+                    for (const slot of ['1', '2', '3', '4'] as const) {
+                        if (!lobbyData.teams[team][slot]) {
+                            await handleJoinTeam(team, slot, lobbyDoc.id);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        const playerLobbyRef = ref(rtdb, `playerLobbies/${player.id}`);
+        const unsubscribePlayerLobby = onValue(playerLobbyRef, (snapshot) => {
+            const lobbyId = snapshot.val();
+            if (lobbyId) {
+                unsubscribePlayerLobby();
+                remove(playerLobbyRef);
+                setCustomLobbyId(lobbyId);
+                setupTeamLobbyListener(lobbyId, true);
+            }
+        });
+
+        rtdbRunTransaction(teamQueueRef, (queue) => {
+            if (queue === null) queue = {};
+            
+            queue[player.id] = { id: player.id, username: player.username, avatarUrl: player.avatarUrl, rating: player.rating, joinedAt: rtdbServerTimestamp() };
+
+            if (Object.keys(queue).length >= 8) {
+                const players = Object.values(queue).slice(0, 8);
+                players.forEach((p: any) => delete queue[p.id]);
+
+                (async () => {
+                    const teamLobbyId = `team-lobby-${Date.now()}`;
+                    const newLobbyRef = ref(rtdb, `customLobbies/${teamLobbyId}`);
+                    const playersData = (players as TeamLobbyPlayer[]).sort((a, b) => a.rating - b.rating);
+
+                    const newLobby: TeamLobby = {
+                        id: teamLobbyId,
+                        hostId: playersData[0].id,
+                        isPublic: true,
+                        status: 'forming',
+                        teams: {
+                            blue: { '1': playersData[0], '2': playersData[2], '3': playersData[4], '4': playersData[6] },
+                            red: { '1': playersData[1], '2': playersData[3], '3': playersData[5], '4': playersData[7] }
+                        }
+                    };
+
+                    await set(newLobbyRef, newLobby);
+
+                    const playerLobbyUpdates: { [key: string]: string } = {};
+                    playersData.forEach(p => { playerLobbyUpdates[`/playerLobbies/${p.id}`] = teamLobbyId; });
+                    await update(ref(rtdb), playerLobbyUpdates);
+                })();
+            }
+            playerQueueRef.current = child(teamQueueRef, player.id);
+            return queue;
+        });
+
+    } catch(e) {
+      toast({ title: "Error", description: "Could not find a public match.", variant: "destructive" });
+    }
+  }, [player, setupTeamLobbyListener]);
+  
+  const handleJoinCustomLobby = async (lobbyCode: string, lobbyName: DifficultyLobby) => {
+     if (!player || !rtdb || !lobbyCode) return;
+
+     const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
+     if (!lobby) return;
+     if (player.coins < lobby.entryFee) {
+        toast({ title: "Insufficient Coins", description: "You don't have enough coins.", variant: "destructive" });
+        return;
+     }
+
+     const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
+     const snapshot = await get(lobbyRef);
+     if (snapshot.exists()) {
+         try {
+            if (IS_FIREBASE_CONFIGURED) {
+                const playerRef = doc(db, "players", player.id);
+                await runTransaction(db, async (transaction) => {
+                    const playerSnap = await transaction.get(playerRef);
+                    if (!playerSnap.exists() || playerSnap.data().coins < lobby.entryFee) throw new Error("Insufficient coins.");
+                    transaction.update(playerRef, { coins: playerSnap.data().coins - lobby.entryFee });
+                });
+            }
+            setupTeamLobbyListener(lobbyCode);
+            setCustomLobbyId(lobbyCode);
+            setSelectedLobbyName(lobbyName);
+            setGameState('inCustomLobby');
+         } catch (e) {
+             toast({ title: 'Error', description: 'Could not join lobby.', variant: 'destructive'});
+         }
+     } else {
+         toast({ title: 'Not Found', description: 'Lobby code is invalid or has expired.', variant: 'destructive'});
+     }
+  };
+  
+  const handleJoinTeam = async (team: 'blue' | 'red', slot: '1' | '2' | '3' | '4', lobbyId?: string) => {
+      if (!player || !rtdb) return;
+      const id = lobbyId || customLobbyId;
+      if (!id) {
+        toast({ title: "Error", description: "Lobby ID not found.", variant: "destructive"});
+        return;
+      }
+      
+      const slotRef = ref(rtdb, `customLobbies/${id}/teams/${team}/${slot}`);
+      
+      const newPlayerInSlot: TeamLobbyPlayer = {
+          id: player.id,
+          username: player.username,
+          rating: player.rating,
+          avatarUrl: player.avatarUrl,
+      };
+
+      try {
+        await set(slotRef, newPlayerInSlot);
+        setCustomLobbyId(id);
+        setupTeamLobbyListener(id);
+      } catch (error) {
+        console.error("Failed to join team slot", error);
+        toast({ title: "Error", description: "Could not join the team.", variant: "destructive"});
+      }
+  };
 
   const handleToggleLock = async () => {
     if (!customLobbyId || !rtdb || !teamLobbyData || player?.id !== teamLobbyData.hostId) return;
@@ -1202,11 +1248,11 @@ await processGameEnd(finalBattleState);
                 <LobbySelection
                     lobbies={LOBBIES}
                     player={player}
-                    onLobbySelect={(lobby) => handleLobbyAction(lobby.name, '1v1', 'find')}
+                    onLobbySelect={handleLobby1v1Action}
                     isFirebaseConfigured={IS_FIREBASE_CONFIGURED}
-                    onCreateCustomLobby={(lobbyName) => handleLobbyAction(lobbyName, '4v4', 'create')}
-                    onJoinCustomLobby={(lobbyCode) => handleLobbyAction('medium', '4v4', 'join', lobbyCode)}
-                    onFindPublicTeamMatch={(lobbyName) => handleLobbyAction(lobbyName, '4v4', 'find')}
+                    onCreateCustomLobby={handleCreateCustomLobby}
+                    onJoinCustomLobby={(lobbyCode) => handleJoinCustomLobby(lobbyCode, 'medium')}
+                    onFindPublicTeamMatch={handleFindPublicTeamMatch}
                 />
             );
         case 'searching':
@@ -1356,5 +1402,7 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
