@@ -125,7 +125,7 @@ const generateCodingChallengeFlow = ai.defineFlow(
     outputSchema: GenerateCodingChallengeOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input, {model: 'googleai/gemini-1.5-flash-latest'});
+    const {output} = await prompt(input, {model: `${process.env.NEXT_PUBLIC_GENKIT_MODEL}`});
 
     // Check if output is null/undefined after the prompt call.
     // This handles cases where the prompt doesn't throw an error but returns no valid output
