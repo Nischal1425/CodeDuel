@@ -11,6 +11,7 @@
  */
 
 import {ai} from '@/ai/genkit';
+import { googleAI } from '@genkit-ai/googleai';
 import {z} from 'genkit';
 
 const GenerateCodingChallengeInputSchema = z.object({
@@ -52,6 +53,7 @@ export async function generateCodingChallenge(
 
 const prompt = ai.definePrompt({
   name: 'generateCodingChallengePrompt',
+  model: googleAI.model('gemini-1.5-flash-latest'),
   input: {schema: GenerateCodingChallengeInputSchema},
   output: {schema: GenerateCodingChallengeOutputSchema},
   prompt: `You are an expert coding challenge generator. You will generate a unique coding problem tailored to the player's skill level and the target difficulty.
@@ -154,3 +156,5 @@ const generateCodingChallengeFlow = ai.defineFlow(
     return output; // No longer using 'output!' as we've checked for !output above.
   }
 );
+
+    
