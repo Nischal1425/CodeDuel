@@ -1,5 +1,4 @@
 
-
 "use client";
 
 import type { FormEvent } from 'react';
@@ -650,6 +649,11 @@ export default function ArenaPage() {
 
   const setupTeamLobbyListener = useCallback((lobbyId: string, isPublicMatch: boolean = false) => {
     if (!rtdb || !player) return;
+
+    if (customLobbyListenerUnsubscribe.current) {
+        customLobbyListenerUnsubscribe.current();
+    }
+    
     const lobbyRef = ref(rtdb, `customLobbies/${lobbyId}`);
     
     customLobbyListenerUnsubscribe.current = onValue(lobbyRef, (snapshot) => {
@@ -662,7 +666,6 @@ export default function ArenaPage() {
         }
         const data = snapshot.val() as TeamLobby;
         
-        // This is a crucial addition to handle initial data load correctly.
         setTeamLobbyData(data);
         
         if (isPublicMatch) {
@@ -741,8 +744,8 @@ export default function ArenaPage() {
         
         setCustomLobbyId(lobbyCode);
         setSelectedLobbyName(lobbyName);
-        setupTeamLobbyListener(lobbyCode);
         setGameState('inCustomLobby');
+        setupTeamLobbyListener(lobbyCode);
   
     } catch (e) {
         console.error("Error creating custom lobby:", e);
