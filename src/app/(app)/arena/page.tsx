@@ -661,6 +661,8 @@ export default function ArenaPage() {
              return;
         }
         const data = snapshot.val() as TeamLobby;
+        
+        // This is a crucial addition to handle initial data load correctly.
         setTeamLobbyData(data);
         
         if (isPublicMatch) {
@@ -1404,3 +1406,5 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
