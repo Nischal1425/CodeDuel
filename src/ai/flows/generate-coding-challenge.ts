@@ -80,7 +80,7 @@ Generate a coding problem with the following specifications:
     - Each testCase needs a 'name'.
     - 'input': Input for the test case.
         - If the problem has multiple conceptual parameters (e.g., \`nums\` and \`target\`), this MUST be a JSON STRING representing an object mapping these parameter names to their values. Example: For inputs \`nums = [1,2,3]\` and \`k = 2\`, the input string should be \`'{"nums": [1,2,3], "k": 2}'\`.
-        - If the problem has a single primitive input (e.g., \`5\` or \`"hello"\`), this should be a plain string representation of that primitive. Example: for input \`5\`, the string should be \`'5'\`. For input \`"hello"\` that is meant as a string literal, the string should be \`'"hello"'\` (including the quotes if it's a string literal).
+        - If the problem has a single primitive input (e.g., \`5\` or \`"hello"\`), this should be a plain string representation of that primitive. Example: for input \`5\`, the string should be \`'5'\`. For input \`"hello"\` that is meant as a string literal, the string should be \`'\"hello\"'\` (including the quotes if it's a string literal).
     - 'expectedOutput': Expected output. If complex, provide as a JSON STRING. If simple, provide as a plain string. Example: for output \`[3,4]\`, the string should be \`'[3,4]'\`. For output \`10\`, the string should be \`'10'\`.
     - 'isPublic': Must be true.
 - functionSignature: (Highly recommended) A string representing the primary function signature the player should implement.
@@ -155,5 +155,3 @@ const generateCodingChallengeFlow = ai.defineFlow(
     return output; // No longer using 'output!' as we've checked for !output above.
   }
 );
-
-    
