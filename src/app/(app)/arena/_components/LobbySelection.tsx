@@ -144,7 +144,7 @@ export function LobbySelection({ lobbies, player, onLobbySelect, isFirebaseConfi
                                  onCreate={onCreateCustomLobby}
                                  onFind={onFindPublicTeamMatch}
                                  onJoin={onJoinCustomLobby}
-                                 disabled={notEnoughCoins(teamLobby.entryFee)}
+                                 disabled={notEnoughCoins(teamLobby.entryFee) || !isFirebaseConfigured}
                                />
                             </div>
                         </div>
@@ -156,7 +156,7 @@ export function LobbySelection({ lobbies, player, onLobbySelect, isFirebaseConfi
                     <AlertTriangle className="h-4 w-4" />
                     <AlertTitle>Developer Notice: Live PvP Disabled</AlertTitle>
                     <AlertDescription>
-                    No Firebase credentials found. The app is running in offline bot mode. You will play against a bot.
+                    Live 4v4 is disabled without Firebase RTDB. You can still play 1v1 vs a bot.
                     </AlertDescription>
                 </Alert>
             )}
