@@ -31,7 +31,7 @@ interface LobbySelectionProps {
   isFirebaseConfigured: boolean;
   // New props for custom 4v4 lobbies
   onCreateCustomLobby: (lobbyName: DifficultyLobby) => void;
-  onJoinCustomLobby: (lobbyCode: string) => void;
+  onJoinCustomLobby: (lobbyCode: string, lobbyName: DifficultyLobby) => void;
   onFindPublicTeamMatch: (lobbyName: DifficultyLobby) => void;
 }
 
@@ -59,7 +59,7 @@ function LobbyCard({ lobby, onSelectLobby, disabled }: { lobby: LobbyInfo; onSel
   );
 }
 
-function TeamLobbyCard({ lobby, onCreate, onFind, onJoin, disabled }: { lobby: LobbyInfo; onCreate: () => void; onFind: () => void; onJoin: (code: string) => void; disabled?: boolean; }) {
+function TeamLobbyCard({ lobby, onCreate, onFind, onJoin, disabled }: { lobby: LobbyInfo; onCreate: (lobbyName: DifficultyLobby) => void; onFind: (lobbyName: DifficultyLobby) => void; onJoin: (code: string, lobbyName: DifficultyLobby) => void; disabled?: boolean; }) {
     const [joinCode, setJoinCode] = useState('');
     
     return (
@@ -74,10 +74,10 @@ function TeamLobbyCard({ lobby, onCreate, onFind, onJoin, disabled }: { lobby: L
             </CardContent>
             <CardFooter className="flex-col md:flex-row gap-4 p-4">
                  <div className="w-full flex-1 flex flex-col gap-2">
-                    <Button className="w-full" onClick={onFind} disabled={disabled}>
+                    <Button className="w-full" onClick={() => onFind(lobby.name)} disabled={disabled}>
                         <Gamepad className="mr-2"/> Find Public Match
                     </Button>
-                    <Button className="w-full" onClick={onCreate} disabled={disabled}>
+                    <Button className="w-full" onClick={() => onCreate(lobby.name)} disabled={disabled}>
                        <PlusCircle className="mr-2"/> Create Custom Game
                     </Button>
                 </div>
@@ -95,7 +95,7 @@ function TeamLobbyCard({ lobby, onCreate, onFind, onJoin, disabled }: { lobby: L
                             className="bg-background"
                             disabled={disabled}
                         />
-                        <Button variant="outline" onClick={() => onJoin(joinCode)} disabled={disabled || !joinCode}>
+                        <Button variant="outline" onClick={() => onJoin(joinCode, lobby.name)} disabled={disabled || !joinCode}>
                             <KeyRound className="mr-2"/> Join
                         </Button>
                     </div>
@@ -141,9 +141,9 @@ export function LobbySelection({ lobbies, player, onLobbySelect, isFirebaseConfi
                                <TeamLobbyCard
                                  key={teamLobby.name}
                                  lobby={teamLobby}
-                                 onCreate={() => onCreateCustomLobby(teamLobby.name)}
-                                 onFind={() => onFindPublicTeamMatch(teamLobby.name)}
-                                 onJoin={(code) => onJoinCustomLobby(code)}
+                                 onCreate={onCreateCustomLobby}
+                                 onFind={onFindPublicTeamMatch}
+                                 onJoin={onJoinCustomLobby}
                                  disabled={notEnoughCoins(teamLobby.entryFee)}
                                />
                             </div>
@@ -163,5 +163,3 @@ export function LobbySelection({ lobbies, player, onLobbySelect, isFirebaseConfi
         </div>
     );
 }
-
-    

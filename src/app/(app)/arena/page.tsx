@@ -842,12 +842,12 @@ export default function ArenaPage() {
     } catch(e) {
       toast({ title: "Error", description: "Could not find a public match.", variant: "destructive" });
     }
-  }, [player, setupTeamLobbyListener]);
+  }, [player, setupTeamLobbyListener, toast]);
   
-  const handleJoinCustomLobby = async (lobbyCode: string) => {
-     if (!player || !rtdb || !lobbyCode || !selectedLobbyName) return;
+  const handleJoinCustomLobby = async (lobbyCode: string, lobbyName: DifficultyLobby) => {
+     if (!player || !rtdb || !lobbyCode) return;
 
-     const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
+     const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
      if (!lobby) return;
      if (player.coins < lobby.entryFee) {
         toast({ title: "Insufficient Coins", description: "You don't have enough coins.", variant: "destructive" });
@@ -866,6 +866,7 @@ export default function ArenaPage() {
                     transaction.update(playerRef, { coins: playerSnap.data().coins - lobby.entryFee });
                 });
             }
+            setSelectedLobbyName(lobbyName);
             setupTeamLobbyListener(lobbyCode);
             setCustomLobbyId(lobbyCode);
             setGameState('inCustomLobby');
@@ -1403,11 +1404,3 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
-
-    
-
-    
-
-    
-
-    
