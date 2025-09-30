@@ -578,16 +578,11 @@ export default function ArenaPage() {
 
         await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'starting');
 
-        const [q1, q2, q3, q4] = await Promise.all([
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-            generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName }),
-        ]);
+        // Generate one question for all players in the team battle
+        const question = await generateCodingChallenge({ playerRank: 10, targetDifficulty: lobbyName });
 
         const team1 = Object.values(finalLobbyData.teams.blue).filter((p): p is TeamLobbyPlayer => p !== null);
         const team2 = Object.values(finalLobbyData.teams.red).filter((p): p is TeamLobbyPlayer => p !== null);
-        const questions = [q1, q2, q3, q4];
         
         const teamBattleId = `team-battle-${Date.now()}`;
         
@@ -604,7 +599,8 @@ export default function ArenaPage() {
             difficulty: lobbyName,
             createdAt: serverTimestamp(),
             finishedDuels: 0,
-            winnerTeam: null
+            winnerTeam: null,
+            question
         });
 
         const rtdbUpdates: { [key: string]: any } = {};
@@ -612,7 +608,6 @@ export default function ArenaPage() {
         for (let i = 0; i < 4; i++) {
             const p1 = team1[i];
             const p2 = team2[i];
-            const question = questions[i];
             if (!p1 || !p2) continue;
 
             const isBot1 = p1.id.startsWith('bot_');

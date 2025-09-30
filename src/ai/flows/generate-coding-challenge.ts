@@ -124,7 +124,9 @@ const generateCodingChallengeFlow = ai.defineFlow(
     outputSchema: GenerateCodingChallengeOutputSchema,
   },
   async input => {
+    console.log('input', input);
     const {output} = await prompt(input);
+    console.log('output', output);
 
     // Check if output is null/undefined after the prompt call.
     // This handles cases where the prompt doesn't throw an error but returns no valid output
