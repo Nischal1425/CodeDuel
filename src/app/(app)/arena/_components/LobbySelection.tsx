@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, { useState } from 'react';
@@ -142,7 +143,7 @@ export function LobbySelection({ lobbies, player, onLobbySelect, isFirebaseConfi
                                  lobby={teamLobby}
                                  onCreate={() => onCreateCustomLobby(teamLobby.name)}
                                  onFind={() => onFindPublicTeamMatch(teamLobby.name)}
-                                 onJoin={onJoinCustomLobby}
+                                 onJoin={(code) => onJoinCustomLobby(code)}
                                  disabled={notEnoughCoins(teamLobby.entryFee)}
                                />
                             </div>

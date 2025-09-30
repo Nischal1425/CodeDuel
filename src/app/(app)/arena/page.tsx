@@ -48,17 +48,6 @@ const LOBBIES: LobbyInfo[] = [
   { name: 'medium', title: 'Team DeathMatch', description: '4v4 tactical coding battle.', icon: Users, baseTime: 15, entryFee: 120, gameMode: '4v4' },
 ];
 
-const initialTeamLobbyState: Omit<TeamLobby, 'id'> = {
-    hostId: '',
-    isPublic: false,
-    status: 'waiting',
-    teams: {
-        blue: { '1': null, '2': null, '3': null, '4': null },
-        red: { '1': null, '2': null, '3': null, '4': null },
-    }
-};
-
-
 export default function ArenaPage() {
   const { player } = useAuth(); 
   const { toast } = useToast();
@@ -578,8 +567,7 @@ export default function ArenaPage() {
       }
   }, [player, toast, resetGameState]);
 
-
- const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
+  const startTeamBattle = useCallback(async (lobbyName: DifficultyLobby, finalLobbyData: TeamLobby) => {
     if (!player || !rtdb || !IS_FIREBASE_CONFIGURED || !customLobbyId) return;
 
     try {
@@ -658,7 +646,7 @@ export default function ArenaPage() {
         toast({ title: 'Error', description: 'Could not start the team battle.', variant: 'destructive' });
         if(customLobbyId) await set(ref(rtdb, `customLobbies/${customLobbyId}/status`), 'waiting');
     }
-}, [player, toast, customLobbyId]);
+  }, [player, toast, customLobbyId]);
 
   const setupTeamLobbyListener = useCallback((lobbyId: string, isPublicMatch: boolean = false) => {
     if (!rtdb || !player) return;
@@ -708,14 +696,14 @@ export default function ArenaPage() {
 
   const handleCreateCustomLobby = async (lobbyName: DifficultyLobby) => {
     if (!player || !rtdb) return;
-
+  
     const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
     if (!lobby) return;
     if (player.coins < lobby.entryFee) {
         toast({ title: "Insufficient Coins", description: "You don't have enough coins for this.", variant: "destructive" });
         return;
     }
-
+  
     try {
         if (IS_FIREBASE_CONFIGURED) {
             const playerRef = doc(db, "players", player.id);
@@ -727,21 +715,35 @@ export default function ArenaPage() {
         }
         
         const lobbyCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        
+        const hostPlayer: TeamLobbyPlayer = {
+          id: player.id,
+          username: player.username,
+          rating: player.rating,
+          avatarUrl: player.avatarUrl,
+        };
+
         const newLobby: TeamLobby = {
             id: lobbyCode,
-            ...initialTeamLobbyState,
-            hostId: player.id
+            hostId: player.id,
+            isPublic: false,
+            status: 'waiting',
+            teams: {
+                blue: { '1': hostPlayer, '2': null, '3': null, '4': null },
+                red: { '1': null, '2': null, '3': null, '4': null },
+            }
         };
         
         const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
         await set(lobbyRef, newLobby);
         
-        setupTeamLobbyListener(lobbyCode);
         setCustomLobbyId(lobbyCode);
         setSelectedLobbyName(lobbyName);
+        setupTeamLobbyListener(lobbyCode);
         setGameState('inCustomLobby');
-
+  
     } catch (e) {
+        console.error("Error creating custom lobby:", e);
         toast({ title: "Error", description: "Could not create lobby.", variant: "destructive"});
     }
   };
@@ -842,10 +844,10 @@ export default function ArenaPage() {
     }
   }, [player, setupTeamLobbyListener]);
   
-  const handleJoinCustomLobby = async (lobbyCode: string, lobbyName: DifficultyLobby) => {
-     if (!player || !rtdb || !lobbyCode) return;
+  const handleJoinCustomLobby = async (lobbyCode: string) => {
+     if (!player || !rtdb || !lobbyCode || !selectedLobbyName) return;
 
-     const lobby = LOBBIES.find(l => l.name === lobbyName && l.gameMode === '4v4');
+     const lobby = LOBBIES.find(l => l.name === selectedLobbyName && l.gameMode === '4v4');
      if (!lobby) return;
      if (player.coins < lobby.entryFee) {
         toast({ title: "Insufficient Coins", description: "You don't have enough coins.", variant: "destructive" });
@@ -866,7 +868,6 @@ export default function ArenaPage() {
             }
             setupTeamLobbyListener(lobbyCode);
             setCustomLobbyId(lobbyCode);
-            setSelectedLobbyName(lobbyName);
             setGameState('inCustomLobby');
          } catch (e) {
              toast({ title: 'Error', description: 'Could not join lobby.', variant: 'destructive'});
@@ -1251,7 +1252,7 @@ await processGameEnd(finalBattleState);
                     onLobbySelect={handleLobby1v1Action}
                     isFirebaseConfigured={IS_FIREBASE_CONFIGURED}
                     onCreateCustomLobby={handleCreateCustomLobby}
-                    onJoinCustomLobby={(lobbyCode) => handleJoinCustomLobby(lobbyCode, 'medium')}
+                    onJoinCustomLobby={handleJoinCustomLobby}
                     onFindPublicTeamMatch={handleFindPublicTeamMatch}
                 />
             );
@@ -1402,6 +1403,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
