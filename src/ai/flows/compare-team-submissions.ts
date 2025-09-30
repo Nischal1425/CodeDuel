@@ -12,7 +12,8 @@ import { ai } from '@/ai/genkit';
 import { z } from 'zod';
 import type { EvaluateCodeSubmissionInput, EvaluateCodeSubmissionOutput } from './evaluate-code-submission';
 import { evaluateCodeSubmission } from './evaluate-code-submission';
-import type { TeamBattlePlayer, GenerateCodingChallengeOutput } from '@/types';
+import type { TeamBattlePlayer } from '@/types';
+import type { GenerateCodingChallengeOutput } from './generate-coding-challenge';
 
 // Constants for scoring
 const CORRECT_SOLUTION_POINTS = 100;
