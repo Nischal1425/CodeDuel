@@ -53,7 +53,6 @@ export async function generateCodingChallenge(
 
 const prompt = ai.definePrompt({
   name: 'generateCodingChallengePrompt',
-  model: googleAI.model('gemini-1.5-flash-latest'),
   input: {schema: GenerateCodingChallengeInputSchema},
   output: {schema: GenerateCodingChallengeOutputSchema},
   prompt: `You are an expert coding challenge generator. You will generate a unique coding problem tailored to the player's skill level and the target difficulty.
@@ -126,7 +125,7 @@ const generateCodingChallengeFlow = ai.defineFlow(
     outputSchema: GenerateCodingChallengeOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
+    const {output} = await prompt(input, {model: 'googleai/gemini-1.5-flash-latest'});
 
     // Check if output is null/undefined after the prompt call.
     // This handles cases where the prompt doesn't throw an error but returns no valid output
