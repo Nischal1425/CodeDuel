@@ -736,9 +736,9 @@ export default function ArenaPage() {
         const lobbyRef = ref(rtdb, `customLobbies/${lobbyCode}`);
         await set(lobbyRef, newLobby);
         
+        setupTeamLobbyListener(lobbyCode);
         setCustomLobbyId(lobbyCode);
         setSelectedLobbyName(lobbyName);
-        setupTeamLobbyListener(lobbyCode);
         setGameState('inCustomLobby');
 
     } catch (e) {
@@ -1402,6 +1402,8 @@ export function ArenaLeaveConfirmationDialog({ open, onOpenChange, onConfirm, ty
     </AlertDialog>
   );
 }
+
+    
 
     
 
